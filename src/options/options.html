@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>BloqueaSitios Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <div>
+          <h1>BloqueaSitios</h1>
+          <p class="subtitle">Blocks selected sites except during “class” times from a chosen Google Calendar.</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Blocked sites</h2>
+        <p class="hint">Enter one domain per line, or use <code>*</code> to block all sites.</p>
+        <textarea id="blockedDomains" rows="6" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="saveBlocked" class="primary">Save blocklist</button>
+          <span id="saveBlockedStatus" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Allowed sites</h2>
+        <p class="hint">
+          Sites that are always allowed, even when using <code>*</code> to block everything.<br>
+          Supports: <code>domain.com</code>, <code>*.domain.com</code> (subdomains), <code>domain.com/path</code> (specific path).
+        </p>
+        <textarea id="allowedDomains" rows="6" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="saveAllowed" class="primary">Save allowlist</button>
+          <span id="saveAllowedStatus" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Class calendar</h2>
+        <p class="hint">
+          Choose the single calendar that represents your classes. All timed events in that calendar count as class time.
+        </p>
+        <div class="row">
+          <button id="connectGoogle" class="primary">Connect Google</button>
+          <button id="refreshCalendars">Refresh calendars</button>
+          <span id="authStatus" class="status"></span>
+        </div>
+        <label class="label" for="calendarSelect">Calendar</label>
+        <select id="calendarSelect"></select>
+        <div class="row">
+          <button id="saveCalendar" class="primary">Save calendar</button>
+          <button id="syncNow">Sync now</button>
+          <span id="syncStatus" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Status</h2>
+        <div class="kv">
+          <div class="k">Last sync</div>
+          <div class="v" id="lastSync">—</div>
+          <div class="k">Last error</div>
+          <div class="v" id="lastError">—</div>
+        </div>
+        <p class="hint">
+          Incognito: to block there too, enable <strong>Allow in incognito</strong> in <code>chrome://extensions</code> for this extension.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>
+
+
+
+
+
+

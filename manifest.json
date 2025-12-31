@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "BloqueaSitios (Class-aware)",
+  "version": "0.1.0",
+  "description": "Blocks selected websites except during class times from a chosen Google Calendar.",
+  "minimum_chrome_version": "114",
+  "action": {
+    "default_title": "BloqueaSitios",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_page": "src/options/options.html",
+  "background": {
+    "service_worker": "src/background/service_worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "identity",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*"
+  ],
+  "oauth2": {
+    "client_id": "659649117610-m025sicvmquh01c59f7odrtpfq4e52et.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/calendar.readonly"]
+  },
+  "declarative_net_request": {
+    "rule_resources": []
+  }
+}
+
+
