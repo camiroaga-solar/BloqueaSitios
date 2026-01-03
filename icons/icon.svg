@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Shield background -->
+  <path d="M64 8 L112 28 L112 56 C112 88 88 112 64 120 C40 112 16 88 16 56 L16 28 Z"
+        fill="#4A90D9" stroke="#2E5A8B" stroke-width="3"/>
+
+  <!-- Inner shield highlight -->
+  <path d="M64 16 L104 33 L104 56 C104 83 83 104 64 111 C45 104 24 83 24 56 L24 33 Z"
+        fill="#5BA0E9"/>
+
+  <!-- Block/prohibition circle -->
+  <circle cx="64" cy="62" r="32" fill="none" stroke="#FFFFFF" stroke-width="8"/>
+
+  <!-- Diagonal line -->
+  <line x1="41" y1="39" x2="87" y2="85" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Red prohibition overlay -->
+  <circle cx="64" cy="62" r="28" fill="none" stroke="#E53935" stroke-width="6"/>
+  <line x1="44" y1="42" x2="84" y2="82" stroke="#E53935" stroke-width="6" stroke-linecap="round"/>
+</svg>
