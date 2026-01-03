@@ -64,6 +64,14 @@ with your real OAuth client ID.
 - All-day events are **ignored** (only events with `start.dateTime` / `end.dateTime` count).
 - The extension caches upcoming class windows and refreshes periodically.
 
+## macOS: apply the same schedule to Safari/Firefox (adds friction)
+
+Chrome extensions can’t reliably stop you from disabling them, and they don’t affect Safari/Firefox.
+
+If you want **system-wide blocking** on macOS that follows the same “calendar-driven class time” schedule, see:
+
+- `macos/README.md`
+
 
 
 

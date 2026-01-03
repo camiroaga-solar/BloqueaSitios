@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.bloqueasitios.enforcer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/python3</string>
+      <string>/Library/Application Support/BloqueaSitios/bloqueasitios_enforcer.py</string>
+      <string>/Library/Application Support/BloqueaSitios/config.json</string>
+      <string>/Library/Application Support/BloqueaSitios/state.json</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Run every minute to react quickly to calendar boundaries. -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/bloqueasitios-enforcer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/bloqueasitios-enforcer.err.log</string>
+  </dict>
+</plist>
+
+

@@ -1,0 +1,14 @@
+{
+  "calendarName": "Classes",
+  "behavior": "block_when_not_in_class",
+  "lookaheadDays": 7,
+  "lookbehindMinutes": 10,
+  "blockedDomains": [
+    "youtube.com",
+    "reddit.com",
+    "x.com"
+  ],
+  "allowedDomains": []
+}
+
+
