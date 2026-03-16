@@ -11,17 +11,62 @@
       <div class="title">BloqueaSitios</div>
       <div id="status" class="status">Loading…</div>
       <div id="detail" class="detail"></div>
+
+      <!-- Active unlock banner -->
+      <div id="unlockBanner" class="unlock-banner hidden">
+        <div id="unlockBannerText" class="unlock-banner-text"></div>
+        <button id="cancelUnlock" class="btn btn-small danger">Re-lock now</button>
+      </div>
+
       <div class="actions">
         <button id="syncNow" class="btn">Sync calendar</button>
+        <button id="toggleUnlock" class="btn secondary">Temp unlock</button>
         <a class="btn secondary" href="#" id="openOptions">Settings</a>
+      </div>
+
+      <!-- Unlock form (hidden by default) -->
+      <div id="unlockForm" class="unlock-form hidden">
+        <div class="form-group">
+          <label class="form-label">Unlock type</label>
+          <select id="unlockType" class="form-input">
+            <option value="all">All sites</option>
+            <option value="site">Specific site</option>
+          </select>
+        </div>
+        <div id="siteGroup" class="form-group hidden">
+          <label class="form-label">Site to unblock</label>
+          <input id="unlockSite" type="text" class="form-input" placeholder="e.g. youtube.com" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration</label>
+          <select id="unlockDuration" class="form-input">
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+            <option value="15" selected>15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="120">2 hours</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reason (required)</label>
+          <textarea id="unlockReason" class="form-input form-textarea" placeholder="Why do you need access?" rows="2"></textarea>
+        </div>
+        <button id="submitUnlock" class="btn accent" disabled>Unlock</button>
+      </div>
+
+      <!-- Log section -->
+      <div class="log-actions">
+        <button id="toggleLog" class="btn-link">View unlock log</button>
+      </div>
+      <div id="logSection" class="log-section hidden">
+        <div id="logEntries" class="log-entries"></div>
+        <div class="log-buttons">
+          <button id="downloadLog" class="btn btn-small">Download CSV</button>
+          <button id="clearLog" class="btn btn-small secondary">Clear log</button>
+        </div>
       </div>
     </main>
     <script type="module" src="./popup.js"></script>
   </body>
 </html>
-
-
-
-
-
-

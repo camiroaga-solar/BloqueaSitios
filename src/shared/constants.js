@@ -5,7 +5,9 @@ export const STORAGE_KEYS = {
   calendarTimeZone: "calendarTimeZone",
   cachedClassWindows: "cachedClassWindows",
   lastCalendarSyncAt: "lastCalendarSyncAt",
-  lastCalendarSyncError: "lastCalendarSyncError"
+  lastCalendarSyncError: "lastCalendarSyncError",
+  tempUnlock: "tempUnlock",
+  unlockLog: "unlockLog"
 };
 
 export const DEFAULTS = {
@@ -15,12 +17,15 @@ export const DEFAULTS = {
   calendarTimeZone: null,
   cachedClassWindows: [],
   lastCalendarSyncAt: null,
-  lastCalendarSyncError: null
+  lastCalendarSyncError: null,
+  tempUnlock: null,
+  unlockLog: []
 };
 
 export const ALARM_NAMES = {
   periodicSync: "periodicCalendarSync",
-  boundaryRecheck: "boundaryRecheck"
+  boundaryRecheck: "boundaryRecheck",
+  tempUnlockExpiry: "tempUnlockExpiry"
 };
 
 export const CALENDAR_SYNC = {

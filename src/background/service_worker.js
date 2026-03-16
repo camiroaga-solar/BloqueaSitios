@@ -9,19 +9,44 @@ import {
   nextBoundaryAfter
 } from "./calendar_api.js";
 
+function isUnlockActive(tempUnlock) {
+  if (!tempUnlock) return false;
+  return Date.now() < tempUnlock.until;
+}
+
 async function updateBlockingBasedOnState() {
   const { blockedDomains, allowedDomains } = await getSettings();
-  const { cachedClassWindows } = await getRuntimeState();
+  const { cachedClassWindows, tempUnlock } = await getRuntimeState();
   const inClass = isInClassAt(cachedClassWindows, Date.now());
+  const unlock = isUnlockActive(tempUnlock) ? tempUnlock : null;
+
+  // Clear expired unlock
+  if (tempUnlock && !unlock) {
+    await setRuntimeState({ tempUnlock: null });
+  }
 
   if (inClass) {
     await replaceDynamicRules([]);
-    return { inClass, rulesApplied: 0 };
+    return { inClass, rulesApplied: 0, unlockActive: !!unlock };
+  }
+
+  if (unlock && unlock.type === "all") {
+    // Full unlock — remove all blocking rules
+    await replaceDynamicRules([]);
+    return { inClass, rulesApplied: 0, unlockActive: true };
+  }
+
+  if (unlock && unlock.type === "site") {
+    // Unblock a specific site by adding it to the allowed list temporarily
+    const tempAllowed = [...allowedDomains, unlock.site];
+    const rules = buildBlockingRules(blockedDomains, tempAllowed);
+    await replaceDynamicRules(rules);
+    return { inClass, rulesApplied: rules.length, unlockActive: true };
   }
 
   const rules = buildBlockingRules(blockedDomains, allowedDomains);
   await replaceDynamicRules(rules);
-  return { inClass, rulesApplied: rules.length };
+  return { inClass, rulesApplied: rules.length, unlockActive: false };
 }
 
 async function scheduleBoundaryRecheck() {
@@ -96,6 +121,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_NAMES.boundaryRecheck) {
     void updateBlockingBasedOnState().then(() => scheduleBoundaryRecheck());
+    return;
+  }
+  if (alarm.name === ALARM_NAMES.tempUnlockExpiry) {
+    void (async () => {
+      await setRuntimeState({ tempUnlock: null });
+      await updateBlockingBasedOnState();
+    })();
   }
 });
 
@@ -119,6 +151,66 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "APPLY_BLOCKING") {
     void updateBlockingBasedOnState().then((r) => sendResponse({ ok: true, ...r }));
+    return true;
+  }
+  if (msg?.type === "TEMP_UNLOCK") {
+    void (async () => {
+      try {
+        const { unlockType, site, reason, durationMinutes } = msg;
+        const now = Date.now();
+        const until = now + durationMinutes * 60 * 1000;
+        const unlock = {
+          type: unlockType, // "site" or "all"
+          site: unlockType === "site" ? site : null,
+          reason,
+          grantedAt: now,
+          until
+        };
+        // Save unlock state
+        await setRuntimeState({ tempUnlock: unlock });
+        // Add to log
+        const { unlockLog } = await getRuntimeState();
+        const logEntry = {
+          type: unlockType,
+          site: unlock.site,
+          reason,
+          grantedAt: new Date(now).toISOString(),
+          durationMinutes,
+          expiresAt: new Date(until).toISOString()
+        };
+        await setRuntimeState({ unlockLog: [...unlockLog, logEntry] });
+        // Set alarm to re-lock
+        await chrome.alarms.create(ALARM_NAMES.tempUnlockExpiry, { when: until });
+        // Apply immediately
+        await updateBlockingBasedOnState();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+  if (msg?.type === "CANCEL_UNLOCK") {
+    void (async () => {
+      await chrome.alarms.clear(ALARM_NAMES.tempUnlockExpiry);
+      await setRuntimeState({ tempUnlock: null });
+      await updateBlockingBasedOnState();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (msg?.type === "GET_UNLOCK_LOG") {
+    void (async () => {
+      const { unlockLog } = await getRuntimeState();
+      sendResponse({ ok: true, log: unlockLog });
+    })();
+    return true;
+  }
+  if (msg?.type === "CLEAR_UNLOCK_LOG") {
+    void (async () => {
+      await setRuntimeState({ unlockLog: [] });
+      sendResponse({ ok: true });
+    })();
     return true;
   }
   return false;

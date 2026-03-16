@@ -26,7 +26,9 @@ export async function getRuntimeState() {
     cachedClassWindows: DEFAULTS.cachedClassWindows,
     calendarTimeZone: DEFAULTS.calendarTimeZone,
     lastCalendarSyncAt: DEFAULTS.lastCalendarSyncAt,
-    lastCalendarSyncError: DEFAULTS.lastCalendarSyncError
+    lastCalendarSyncError: DEFAULTS.lastCalendarSyncError,
+    tempUnlock: DEFAULTS.tempUnlock,
+    unlockLog: DEFAULTS.unlockLog
   });
   return result;
 }
