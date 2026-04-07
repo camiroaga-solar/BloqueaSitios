@@ -20,12 +20,11 @@
 
       <div class="actions">
         <button id="syncNow" class="btn">Sync calendar</button>
-        <button id="toggleUnlock" class="btn secondary">Temp unlock</button>
         <a class="btn secondary" href="#" id="openOptions">Settings</a>
       </div>
 
-      <!-- Unlock form (hidden by default) -->
-      <div id="unlockForm" class="unlock-form hidden">
+      <div class="unlock-section-label">Temp unlock</div>
+      <div id="unlockForm" class="unlock-form">
         <div class="form-group">
           <label class="form-label">Unlock type</label>
           <select id="unlockType" class="form-input">
@@ -40,19 +39,16 @@
         <div class="form-group">
           <label class="form-label">Duration</label>
           <select id="unlockDuration" class="form-input">
+            <option value="1" selected>1 minute</option>
+            <option value="2">2 minutes</option>
             <option value="5">5 minutes</option>
             <option value="10">10 minutes</option>
-            <option value="15" selected>15 minutes</option>
+            <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
             <option value="60">1 hour</option>
-            <option value="120">2 hours</option>
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Reason (required)</label>
-          <textarea id="unlockReason" class="form-input form-textarea" placeholder="Why do you need access?" rows="2"></textarea>
-        </div>
-        <button id="submitUnlock" class="btn accent" disabled>Unlock</button>
+        <button id="submitUnlock" class="btn accent">Unlock</button>
       </div>
 
       <!-- Log section -->

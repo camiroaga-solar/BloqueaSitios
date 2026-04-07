@@ -156,13 +156,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "TEMP_UNLOCK") {
     void (async () => {
       try {
-        const { unlockType, site, reason, durationMinutes } = msg;
+        const { unlockType, site, durationMinutes } = msg;
         const now = Date.now();
         const until = now + durationMinutes * 60 * 1000;
         const unlock = {
           type: unlockType, // "site" or "all"
           site: unlockType === "site" ? site : null,
-          reason,
           grantedAt: now,
           until
         };
@@ -173,7 +172,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const logEntry = {
           type: unlockType,
           site: unlock.site,
-          reason,
           grantedAt: new Date(now).toISOString(),
           durationMinutes,
           expiresAt: new Date(until).toISOString()
@@ -215,5 +213,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
-
 

@@ -55,7 +55,7 @@ async function refresh() {
     unlockSpan.textContent = unlockLine;
     unlockSpan.className = "status-line ok";
     statusEl.appendChild(unlockSpan);
-    bannerText.textContent = `"${tempUnlock.reason}"`;
+    bannerText.textContent = "Temporary unlock is active.";
     banner.classList.remove("hidden");
   } else {
     banner.classList.add("hidden");
@@ -99,51 +99,42 @@ async function syncNow() {
 // --- Unlock form ---
 
 function setupUnlockForm() {
-  const toggleBtn = document.getElementById("toggleUnlock");
-  const form = document.getElementById("unlockForm");
   const typeSelect = document.getElementById("unlockType");
   const siteGroup = document.getElementById("siteGroup");
   const siteInput = document.getElementById("unlockSite");
-  const reasonInput = document.getElementById("unlockReason");
+  const durationSelect = document.getElementById("unlockDuration");
   const submitBtn = document.getElementById("submitUnlock");
   const cancelBtn = document.getElementById("cancelUnlock");
-
-  toggleBtn.addEventListener("click", () => {
-    form.classList.toggle("hidden");
-    toggleBtn.textContent = form.classList.contains("hidden") ? "Temp unlock" : "Cancel";
-  });
 
   typeSelect.addEventListener("change", () => {
     siteGroup.classList.toggle("hidden", typeSelect.value !== "site");
   });
 
   function validateForm() {
-    const hasReason = reasonInput.value.trim().length > 0;
     const hasSite = typeSelect.value !== "site" || siteInput.value.trim().length > 0;
-    submitBtn.disabled = !(hasReason && hasSite);
+    submitBtn.disabled = !hasSite;
   }
 
-  reasonInput.addEventListener("input", validateForm);
   siteInput.addEventListener("input", validateForm);
   typeSelect.addEventListener("change", validateForm);
+  validateForm();
 
   submitBtn.addEventListener("click", async () => {
     submitBtn.disabled = true;
     submitBtn.textContent = "Unlocking…";
-    const duration = document.getElementById("unlockDuration");
     try {
       await chrome.runtime.sendMessage({
         type: "TEMP_UNLOCK",
         unlockType: typeSelect.value,
         site: siteInput.value.trim(),
-        reason: reasonInput.value.trim(),
-        durationMinutes: Number(duration.value)
+        durationMinutes: Number(durationSelect.value)
       });
       // Reset form
-      reasonInput.value = "";
+      typeSelect.value = "all";
+      siteGroup.classList.add("hidden");
       siteInput.value = "";
-      form.classList.add("hidden");
-      toggleBtn.textContent = "Temp unlock";
+      durationSelect.value = "1";
+      validateForm();
       await refresh();
     } catch (e) {
       submitBtn.textContent = "Error";
@@ -199,7 +190,6 @@ function setupLog() {
           <span class="log-date">${date}</span>
           <span class="log-target">${escapeHtml(target)}</span>
           <span class="log-duration">${e.durationMinutes}m</span>
-          <span class="log-reason">${escapeHtml(e.reason)}</span>
         </div>`;
       })
       .join("");
@@ -208,10 +198,9 @@ function setupLog() {
   downloadBtn.addEventListener("click", async () => {
     const resp = await chrome.runtime.sendMessage({ type: "GET_UNLOCK_LOG" });
     const log = resp?.log || [];
-    const header = "Date,Type,Site,Duration (min),Reason,Expires At\n";
+    const header = "Date,Type,Site,Duration (min),Expires At\n";
     const rows = log.map((e) => {
-      const reason = `"${(e.reason || "").replace(/"/g, '""')}"`;
-      return `${e.grantedAt},${e.type},${e.site || "all"},${e.durationMinutes},${reason},${e.expiresAt}`;
+      return `${e.grantedAt},${e.type},${e.site || "all"},${e.durationMinutes},${e.expiresAt}`;
     });
     const csv = header + rows.join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -248,6 +237,7 @@ document.getElementById("openOptions").addEventListener("click", async (e) => {
 async function init() {
   setupUnlockForm();
   setupLog();
+  document.getElementById("unlockDuration").value = "1";
   await refresh();
   syncNow();
 }
