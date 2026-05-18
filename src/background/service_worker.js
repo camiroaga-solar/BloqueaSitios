@@ -1,4 +1,4 @@
-import { ALARM_NAMES, CALENDAR_SYNC } from "../shared/constants.js";
+import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS } from "../shared/constants.js";
 import { getSettings, getRuntimeState, setRuntimeState } from "../shared/storage.js";
 import { buildBlockingRules, replaceDynamicRules } from "./dnr.js";
 import {
@@ -11,7 +11,21 @@ import {
 
 function isUnlockActive(tempUnlock) {
   if (!tempUnlock) return false;
+  // Not yet activated (waiting for delay)
+  if (tempUnlock.activatesAt && Date.now() < tempUnlock.activatesAt) return false;
   return Date.now() < tempUnlock.until;
+}
+
+function tiersUsedToday(unlockLog) {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const used = new Set();
+  for (const e of unlockLog || []) {
+    if (new Date(e.grantedAt).getTime() >= startOfDay && e.tier) {
+      used.add(e.tier);
+    }
+  }
+  return used;
 }
 
 async function updateBlockingBasedOnState() {
@@ -20,8 +34,9 @@ async function updateBlockingBasedOnState() {
   const inClass = isInClassAt(cachedClassWindows, Date.now());
   const unlock = isUnlockActive(tempUnlock) ? tempUnlock : null;
 
-  // Clear expired unlock
-  if (tempUnlock && !unlock) {
+  // Clear expired unlock (but not pending/delayed ones)
+  const isPending = tempUnlock?.activatesAt && Date.now() < tempUnlock.activatesAt;
+  if (tempUnlock && !unlock && !isPending) {
     await setRuntimeState({ tempUnlock: null });
   }
 
@@ -123,6 +138,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void updateBlockingBasedOnState().then(() => scheduleBoundaryRecheck());
     return;
   }
+  if (alarm.name === ALARM_NAMES.tempUnlockDelayActivate) {
+    // Delay period over — apply the unlock now
+    void updateBlockingBasedOnState();
+    return;
+  }
   if (alarm.name === ALARM_NAMES.tempUnlockExpiry) {
     void (async () => {
       await setRuntimeState({ tempUnlock: null });
@@ -156,30 +176,44 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "TEMP_UNLOCK") {
     void (async () => {
       try {
-        const { unlockType, site, durationMinutes } = msg;
+        const { unlockType, site, durationMinutes, tier } = msg;
+        const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
+        if (!tierDef) {
+          sendResponse({ ok: false, error: "INVALID_TIER" });
+          return;
+        }
+        const { unlockLog } = await getRuntimeState();
+        const used = tiersUsedToday(unlockLog);
+        if (used.has(tier)) {
+          sendResponse({ ok: false, error: "TIER_USED" });
+          return;
+        }
         const now = Date.now();
-        const until = now + durationMinutes * 60 * 1000;
+        const delayMs = tierDef.delayMinutes * 60 * 1000;
+        const activatesAt = delayMs > 0 ? now + delayMs : now;
+        const until = activatesAt + durationMinutes * 60 * 1000;
         const unlock = {
           type: unlockType, // "site" or "all"
           site: unlockType === "site" ? site : null,
+          tier,
           grantedAt: now,
+          activatesAt: delayMs > 0 ? activatesAt : null,
           until
         };
-        // Save unlock state
         await setRuntimeState({ tempUnlock: unlock });
-        // Add to log
-        const { unlockLog } = await getRuntimeState();
         const logEntry = {
           type: unlockType,
           site: unlock.site,
+          tier,
           grantedAt: new Date(now).toISOString(),
           durationMinutes,
           expiresAt: new Date(until).toISOString()
         };
         await setRuntimeState({ unlockLog: [...unlockLog, logEntry] });
-        // Set alarm to re-lock
+        if (delayMs > 0) {
+          await chrome.alarms.create(ALARM_NAMES.tempUnlockDelayActivate, { when: activatesAt });
+        }
         await chrome.alarms.create(ALARM_NAMES.tempUnlockExpiry, { when: until });
-        // Apply immediately
         await updateBlockingBasedOnState();
         sendResponse({ ok: true });
       } catch (err) {
@@ -190,6 +224,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "CANCEL_UNLOCK") {
     void (async () => {
+      await chrome.alarms.clear(ALARM_NAMES.tempUnlockDelayActivate);
       await chrome.alarms.clear(ALARM_NAMES.tempUnlockExpiry);
       await setRuntimeState({ tempUnlock: null });
       await updateBlockingBasedOnState();
@@ -201,6 +236,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     void (async () => {
       const { unlockLog } = await getRuntimeState();
       sendResponse({ ok: true, log: unlockLog });
+    })();
+    return true;
+  }
+  if (msg?.type === "GET_UNLOCKS_TODAY") {
+    void (async () => {
+      const { unlockLog } = await getRuntimeState();
+      const used = tiersUsedToday(unlockLog);
+      // Return which tier ids have been used today
+      sendResponse({ ok: true, usedTiers: [...used] });
     })();
     return true;
   }

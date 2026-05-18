@@ -156,6 +156,7 @@ export async function fetchEventsForCalendar(calendarId, { interactive }) {
 
 export function computeClassWindowsFromEvents(events) {
   // We only count timed events (start.dateTime/end.dateTime). Ignore all-day events.
+  const graceMs = CALENDAR_SYNC.graceMinutes * 60_000;
   const windows = [];
   for (const ev of events || []) {
     const start = ev?.start?.dateTime;
@@ -165,7 +166,7 @@ export function computeClassWindowsFromEvents(events) {
     const endMs = Date.parse(end);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
     if (endMs <= startMs) continue;
-    windows.push({ startMs, endMs });
+    windows.push({ startMs, endMs: endMs + graceMs });
   }
   windows.sort((a, b) => a.startMs - b.startMs);
 

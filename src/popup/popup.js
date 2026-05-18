@@ -35,9 +35,14 @@ async function refresh() {
     ? "In class — sites unblocked"
     : "Not in class — sites blocked";
 
-  // Line 2: temp unlock state (if active)
+  // Line 2: temp unlock state
+  const unlockPending = tempUnlock && tempUnlock.activatesAt && Date.now() < tempUnlock.activatesAt;
   let unlockLine = "";
-  if (unlockActive) {
+  if (unlockPending) {
+    const waitLeft = tempUnlock.activatesAt - Date.now();
+    const target = tempUnlock.type === "all" ? "all sites" : tempUnlock.site;
+    unlockLine = `Unlock pending: ${target} — activates in ${fmtDuration(waitLeft)}`;
+  } else if (unlockActive) {
     const remaining = tempUnlock.until - Date.now();
     const target = tempUnlock.type === "all" ? "all sites" : tempUnlock.site;
     unlockLine = `Temp unlock: ${target} — ${fmtDuration(remaining)} left`;
@@ -53,13 +58,31 @@ async function refresh() {
   if (unlockLine) {
     const unlockSpan = document.createElement("div");
     unlockSpan.textContent = unlockLine;
-    unlockSpan.className = "status-line ok";
+    unlockSpan.className = unlockPending ? "status-line pending" : "status-line ok";
     statusEl.appendChild(unlockSpan);
-    bannerText.textContent = "Temporary unlock is active.";
+    bannerText.textContent = unlockPending
+      ? "Unlock requested — waiting for delay."
+      : "Temporary unlock is active.";
     banner.classList.remove("hidden");
   } else {
     banner.classList.add("hidden");
   }
+
+  // Update tier button states
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "GET_UNLOCKS_TODAY" });
+    if (resp?.ok) {
+      const usedSet = new Set(resp.usedTiers);
+      for (const btn of document.querySelectorAll(".tier-btn")) {
+        const tier = btn.dataset.tier;
+        if (usedSet.has(tier)) {
+          btn.disabled = true;
+          btn.textContent = btn.textContent.replace(/ ✓$/, "") + " ✓";
+        }
+      }
+    }
+  } catch {}
+
 
   // Remove top-level color classes (lines handle their own)
   statusEl.classList.remove("ok", "blocked");
@@ -103,46 +126,47 @@ function setupUnlockForm() {
   const siteGroup = document.getElementById("siteGroup");
   const siteInput = document.getElementById("unlockSite");
   const durationSelect = document.getElementById("unlockDuration");
-  const submitBtn = document.getElementById("submitUnlock");
+  const tierBtns = document.querySelectorAll(".tier-btn");
   const cancelBtn = document.getElementById("cancelUnlock");
 
   typeSelect.addEventListener("change", () => {
     siteGroup.classList.toggle("hidden", typeSelect.value !== "site");
   });
 
-  function validateForm() {
-    const hasSite = typeSelect.value !== "site" || siteInput.value.trim().length > 0;
-    submitBtn.disabled = !hasSite;
+  for (const btn of tierBtns) {
+    btn.addEventListener("click", async () => {
+      const tier = btn.dataset.tier;
+      // Validate site field if needed
+      if (typeSelect.value === "site" && !siteInput.value.trim()) return;
+
+      btn.disabled = true;
+      const origText = btn.textContent;
+      btn.textContent = "Unlocking…";
+      try {
+        const resp = await chrome.runtime.sendMessage({
+          type: "TEMP_UNLOCK",
+          unlockType: typeSelect.value,
+          site: siteInput.value.trim(),
+          durationMinutes: Number(durationSelect.value),
+          tier
+        });
+        if (resp?.error === "TIER_USED") {
+          btn.textContent = "Already used today";
+          setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+          return;
+        }
+        // Reset form
+        typeSelect.value = "all";
+        siteGroup.classList.add("hidden");
+        siteInput.value = "";
+        durationSelect.value = "1";
+        await refresh();
+      } catch {
+        btn.textContent = "Error";
+        setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+      }
+    });
   }
-
-  siteInput.addEventListener("input", validateForm);
-  typeSelect.addEventListener("change", validateForm);
-  validateForm();
-
-  submitBtn.addEventListener("click", async () => {
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Unlocking…";
-    try {
-      await chrome.runtime.sendMessage({
-        type: "TEMP_UNLOCK",
-        unlockType: typeSelect.value,
-        site: siteInput.value.trim(),
-        durationMinutes: Number(durationSelect.value)
-      });
-      // Reset form
-      typeSelect.value = "all";
-      siteGroup.classList.add("hidden");
-      siteInput.value = "";
-      durationSelect.value = "1";
-      validateForm();
-      await refresh();
-    } catch (e) {
-      submitBtn.textContent = "Error";
-    } finally {
-      submitBtn.textContent = "Unlock";
-      submitBtn.disabled = false;
-    }
-  });
 
   cancelBtn.addEventListener("click", async () => {
     cancelBtn.disabled = true;
@@ -237,7 +261,6 @@ document.getElementById("openOptions").addEventListener("click", async (e) => {
 async function init() {
   setupUnlockForm();
   setupLog();
-  document.getElementById("unlockDuration").value = "1";
   await refresh();
   syncNow();
 }
