@@ -118,12 +118,11 @@ async function ensurePeriodicAlarm() {
       periodInMinutes: CALENDAR_SYNC.periodicSyncMinutes
     });
   }
-  const hasHeartbeat = alarms.some((a) => a.name === ALARM_NAMES.heartbeat);
-  if (!hasHeartbeat) {
-    await chrome.alarms.create(ALARM_NAMES.heartbeat, {
-      periodInMinutes: HEARTBEAT_MINUTES
-    });
-  }
+  // Always (re)create so a changed period takes effect on reload (create replaces
+  // any existing alarm with the same name).
+  await chrome.alarms.create(ALARM_NAMES.heartbeat, {
+    periodInMinutes: HEARTBEAT_MINUTES
+  });
 }
 
 // Ping the work log that the blocker is alive, and record the timestamp locally so

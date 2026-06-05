@@ -7,7 +7,7 @@
 export const APP_BASE_URL = "https://app-trabajo-tau.vercel.app";
 export const BLOCKER_TOKEN = "2f6fa6c5e6b647c884cd11dda928c7c3";
 
-export const HEARTBEAT_MINUTES = 1;
+export const HEARTBEAT_MINUTES = 0.5;
 // How long a silence must be before we treat it as "the extension was off".
 export const GAP_THRESHOLD_MS = 5 * 60 * 1000;
 
