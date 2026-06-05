@@ -32,7 +32,7 @@
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",
-    "https://REPLACE_ME.vercel.app/*"
+    "https://app-trabajo-tau.vercel.app/*"
   ],
   "oauth2": {
     "client_id": "659649117610-m025sicvmquh01c59f7odrtpfq4e52et.apps.googleusercontent.com",
