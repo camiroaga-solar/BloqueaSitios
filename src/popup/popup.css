@@ -76,12 +76,12 @@ body {
 }
 
 .tier-buttons {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 5px;
 }
 
 .tier-btn {
-  flex: 1;
   font-size: 11.5px;
   padding: 9px 4px;
   min-width: 0;

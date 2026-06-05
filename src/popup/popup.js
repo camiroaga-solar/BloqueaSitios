@@ -1,5 +1,6 @@
 import { getRuntimeState } from "../shared/storage.js";
 import { isInClassAt, nextBoundaryAfter } from "../background/calendar_api.js";
+import { UNLOCK_TIERS } from "../shared/constants.js";
 
 function fmtTime(ms) {
   try {
@@ -71,15 +72,14 @@ async function refresh() {
   // Update tier button states
   try {
     const resp = await chrome.runtime.sendMessage({ type: "GET_UNLOCKS_TODAY" });
-    if (resp?.ok) {
-      const usedSet = new Set(resp.usedTiers);
-      for (const btn of document.querySelectorAll(".tier-btn")) {
-        const tier = btn.dataset.tier;
-        if (usedSet.has(tier)) {
-          btn.disabled = true;
-          btn.textContent = btn.textContent.replace(/ ✓$/, "") + " ✓";
-        }
-      }
+    const usedSet = new Set(resp?.ok ? resp.usedTiers : []);
+    for (const btn of document.querySelectorAll(".tier-btn")) {
+      const tier = btn.dataset.tier;
+      const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
+      const label = tierDef ? tierDef.label : tier;
+      const isUsed = usedSet.has(tier);
+      btn.disabled = isUsed;
+      btn.textContent = isUsed ? `${label} ✓` : label;
     }
   } catch {}
 
@@ -125,7 +125,6 @@ function setupUnlockForm() {
   const typeSelect = document.getElementById("unlockType");
   const siteGroup = document.getElementById("siteGroup");
   const siteInput = document.getElementById("unlockSite");
-  const durationSelect = document.getElementById("unlockDuration");
   const tierBtns = document.querySelectorAll(".tier-btn");
   const cancelBtn = document.getElementById("cancelUnlock");
 
@@ -136,6 +135,8 @@ function setupUnlockForm() {
   for (const btn of tierBtns) {
     btn.addEventListener("click", async () => {
       const tier = btn.dataset.tier;
+      const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
+      if (!tierDef) return;
       // Validate site field if needed
       if (typeSelect.value === "site" && !siteInput.value.trim()) return;
 
@@ -147,7 +148,7 @@ function setupUnlockForm() {
           type: "TEMP_UNLOCK",
           unlockType: typeSelect.value,
           site: siteInput.value.trim(),
-          durationMinutes: Number(durationSelect.value),
+          durationMinutes: tierDef.durationMinutes,
           tier
         });
         if (resp?.error === "TIER_USED") {
@@ -159,7 +160,6 @@ function setupUnlockForm() {
         typeSelect.value = "all";
         siteGroup.classList.add("hidden");
         siteInput.value = "";
-        durationSelect.value = "1";
         await refresh();
       } catch {
         btn.textContent = "Error";
