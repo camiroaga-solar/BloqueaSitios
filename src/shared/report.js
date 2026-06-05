@@ -34,7 +34,12 @@ async function post(payload) {
 }
 
 export async function sendHeartbeat(status) {
-  await post({ type: "heartbeat", at: Date.now(), status: status || null });
+  await post({
+    type: "heartbeat",
+    at: Date.now(),
+    localDate: localDateString(),
+    status: status || null
+  });
 }
 
 export async function reportDisabled({ gapStart, gapEnd } = {}) {
