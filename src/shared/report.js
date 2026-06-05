@@ -5,7 +5,7 @@
 //   - APP_BASE_URL  : your AppTrabajo deploy origin (also add it to manifest host_permissions)
 //   - BLOCKER_TOKEN : must equal the BLOCKER_TOKEN env var configured in AppTrabajo/Vercel
 export const APP_BASE_URL = "https://REPLACE_ME.vercel.app";
-export const BLOCKER_TOKEN = "REPLACE_ME_TOKEN";
+export const BLOCKER_TOKEN = "2f6fa6c5e6b647c884cd11dda928c7c3";
 
 export const HEARTBEAT_MINUTES = 1;
 // How long a silence must be before we treat it as "the extension was off".
