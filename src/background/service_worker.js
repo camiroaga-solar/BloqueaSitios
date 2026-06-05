@@ -1,6 +1,7 @@
 import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS } from "../shared/constants.js";
 import { getSettings, getRuntimeState, setRuntimeState } from "../shared/storage.js";
 import { buildBlockingRules, replaceDynamicRules } from "./dnr.js";
+import { sendHeartbeat, reportDisabled, HEARTBEAT_MINUTES } from "../shared/report.js";
 import {
   computeClassWindowsFromEvents,
   fetchEventsForCalendar,
@@ -8,6 +9,11 @@ import {
   isInClassAt,
   nextBoundaryAfter
 } from "./calendar_api.js";
+
+// Set when these events fire so the boot check can tell *why* the worker (re)started:
+// a real browser launch / install / update is benign; a bare re-enable is not.
+let sawStartup = false;
+let sawInstallOrUpdate = false;
 
 function isUnlockActive(tempUnlock) {
   if (!tempUnlock) return false;
@@ -112,6 +118,44 @@ async function ensurePeriodicAlarm() {
       periodInMinutes: CALENDAR_SYNC.periodicSyncMinutes
     });
   }
+  const hasHeartbeat = alarms.some((a) => a.name === ALARM_NAMES.heartbeat);
+  if (!hasHeartbeat) {
+    await chrome.alarms.create(ALARM_NAMES.heartbeat, {
+      periodInMinutes: HEARTBEAT_MINUTES
+    });
+  }
+}
+
+// Ping the work log that the blocker is alive, and record the timestamp locally so
+// the server has a "last seen" even between reports.
+async function heartbeatTick() {
+  let status = null;
+  try {
+    status = await updateBlockingBasedOnState();
+  } catch {
+    // Reporting liveness matters even if a rule refresh failed.
+  }
+  await chrome.storage.local.set({ lastAliveAt: Date.now() });
+  await sendHeartbeat(status);
+}
+
+// Detect "the user disabled the extension and re-enabled it" without false-positiving on
+// routine service-worker teardown or laptop sleep. chrome.storage.session is wiped when
+// the extension is reloaded/disabled/updated or the browser restarts, but it survives the
+// worker being torn down and the machine sleeping. So: session marker present => the
+// extension never left; absent => it was reloaded — and if that wasn't a browser launch
+// or an install/update, the only remaining cause is a manual disable→enable.
+async function checkDisabledOnBoot() {
+  const { swAlive } = await chrome.storage.session.get("swAlive");
+  await chrome.storage.session.set({ swAlive: true });
+  if (swAlive) return; // routine wake or sleep/resume — extension stayed enabled
+
+  // Give the startup/installed events a moment to fire so we can rule them out.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  if (sawStartup || sawInstallOrUpdate) return; // browser launch / install / update
+
+  const { lastAliveAt } = await chrome.storage.local.get("lastAliveAt");
+  await reportDisabled({ gapStart: lastAliveAt || null, gapEnd: Date.now() });
 }
 
 async function reevalAll({ interactive }) {
@@ -122,14 +166,20 @@ async function reevalAll({ interactive }) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  sawInstallOrUpdate = true;
   void reevalAll({ interactive: false });
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  sawStartup = true;
   void reevalAll({ interactive: false });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALARM_NAMES.heartbeat) {
+    void heartbeatTick();
+    return;
+  }
   if (alarm.name === ALARM_NAMES.periodicSync) {
     void reevalAll({ interactive: false });
     return;
@@ -176,7 +226,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "TEMP_UNLOCK") {
     void (async () => {
       try {
-        const { unlockType, site, durationMinutes, tier } = msg;
+        const { unlockType, site, tier } = msg;
         const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
         if (!tierDef) {
           sendResponse({ ok: false, error: "INVALID_TIER" });
@@ -190,6 +240,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
         const now = Date.now();
         const delayMs = tierDef.delayMinutes * 60 * 1000;
+        const durationMinutes = tierDef.durationMinutes;
         const activatesAt = delayMs > 0 ? now + delayMs : now;
         const until = activatesAt + durationMinutes * 60 * 1000;
         const unlock = {
@@ -257,4 +308,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+// Runs on every service-worker start (install, browser launch, alarm wake, or a manual
+// re-enable). Make sure the alarms exist, flag a manual re-enable, and report liveness.
+void (async () => {
+  await ensurePeriodicAlarm();
+  await checkDisabledOnBoot();
+  await heartbeatTick();
+})();
 

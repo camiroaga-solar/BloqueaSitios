@@ -23,17 +23,20 @@ export const DEFAULTS = {
 };
 
 export const UNLOCK_TIERS = [
-  { id: "instant1", label: "Instant 1", delayMinutes: 0 },
-  { id: "instant2", label: "Instant 2", delayMinutes: 0 },
-  { id: "instant3", label: "Instant 3", delayMinutes: 0 },
-  { id: "instant4", label: "Instant 4", delayMinutes: 0 }
+  { id: "m5a", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
+  { id: "m5b", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
+  { id: "m15a", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
+  { id: "m15b", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
+  { id: "h1a", label: "1 hour", delayMinutes: 0, durationMinutes: 60 },
+  { id: "h1b", label: "1 hour", delayMinutes: 0, durationMinutes: 60 }
 ];
 
 export const ALARM_NAMES = {
   periodicSync: "periodicCalendarSync",
   boundaryRecheck: "boundaryRecheck",
   tempUnlockExpiry: "tempUnlockExpiry",
-  tempUnlockDelayActivate: "tempUnlockDelayActivate"
+  tempUnlockDelayActivate: "tempUnlockDelayActivate",
+  heartbeat: "blockerHeartbeat"
 };
 
 export const CALENDAR_SYNC = {
