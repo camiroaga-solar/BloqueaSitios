@@ -28,7 +28,9 @@ export async function getRuntimeState() {
     lastCalendarSyncAt: DEFAULTS.lastCalendarSyncAt,
     lastCalendarSyncError: DEFAULTS.lastCalendarSyncError,
     tempUnlock: DEFAULTS.tempUnlock,
-    unlockLog: DEFAULTS.unlockLog
+    unlockLog: DEFAULTS.unlockLog,
+    xSession: DEFAULTS.xSession,
+    xUsage: DEFAULTS.xUsage
   });
   return result;
 }

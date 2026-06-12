@@ -236,6 +236,12 @@ body {
   min-height: 40px;
 }
 
+/* X usage */
+.x-status {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Log section */
 .log-actions {
   margin-top: 12px;

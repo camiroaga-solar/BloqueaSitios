@@ -10,6 +10,15 @@ function fmtTime(ms) {
   }
 }
 
+function fmtBudget(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m > 0 && s > 0) return `${m}m ${s}s`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
+}
+
 function fmtDuration(ms) {
   const mins = Math.max(0, Math.ceil(ms / 60000));
   if (mins < 60) return `${mins}m`;
@@ -68,6 +77,25 @@ async function refresh() {
   } else {
     banner.classList.add("hidden");
   }
+
+  // X usage state
+  try {
+    const xResp = await chrome.runtime.sendMessage({ type: "GET_X_STATUS" });
+    if (xResp?.ok) {
+      const xStatusEl = document.getElementById("xStatus");
+      const slot = (ms) => (ms < 1000 ? "used up" : `${fmtBudget(ms)} left`);
+      xStatusEl.textContent = `AM: ${slot(xResp.remaining.am)} · PM: ${slot(xResp.remaining.pm)}`;
+
+      if (xResp.counting) {
+        const xLine = document.createElement("div");
+        xLine.textContent = `x.com open — ${fmtBudget(xResp.remaining[xResp.period])} left this ${
+          xResp.period === "am" ? "morning" : "afternoon"
+        }`;
+        xLine.className = "status-line ok";
+        statusEl.appendChild(xLine);
+      }
+    }
+  } catch {}
 
   // Update tier button states
   try {

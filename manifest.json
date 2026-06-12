@@ -27,6 +27,8 @@
     "storage",
     "alarms",
     "identity",
+    "tabs",
+    "idle",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess"
   ],

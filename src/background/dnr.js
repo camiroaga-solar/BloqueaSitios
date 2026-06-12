@@ -1,5 +1,46 @@
+import { EMBED_EXCEPTIONS } from "../shared/constants.js";
+
 const BLOCK_RULE_ID_BASE = 1000;
 const ALLOW_RULE_ID_BASE = 2000;
+const X_LIMIT_RULE_ID = 3000;
+const EMBED_ALLOW_RULE_ID_BASE = 4000;
+
+/**
+ * Allow rules for embed exceptions: a blocked domain may still load as an iframe
+ * (sub_frame) when the embedding page is one of the listed sites. Direct visits
+ * (main_frame) and embeds initiated by any other site are untouched, so the
+ * block rules still apply to them.
+ */
+function buildEmbedExceptionRules() {
+  return EMBED_EXCEPTIONS.map((ex, idx) => ({
+    id: EMBED_ALLOW_RULE_ID_BASE + idx,
+    priority: 2,
+    action: { type: "allow" },
+    condition: {
+      requestDomains: ex.frameDomains,
+      initiatorDomains: ex.fromDomains,
+      resourceTypes: ["sub_frame"]
+    }
+  }));
+}
+
+/**
+ * The x.com usage cap outranks both list directions: priority 3 beats the
+ * allow-list rules (2) and the block-list rules (1), so x.com is reachable
+ * while budget remains even if blocked, and blocked once it's spent even if
+ * allowed/unlocked.
+ */
+export function buildXLimitRule(domain, hasBudget) {
+  return {
+    id: X_LIMIT_RULE_ID,
+    priority: 3,
+    action: { type: hasBudget ? "allow" : "block" },
+    condition: {
+      urlFilter: `||${domain}^`,
+      resourceTypes: ["main_frame", "sub_frame"]
+    }
+  };
+}
 
 /**
  * Parse a domain entry into its components.
@@ -193,6 +234,8 @@ export function buildBlockingRules(blockedDomains, allowedDomains = []) {
       }
     });
   }
+
+  rules.push(...buildEmbedExceptionRules());
 
   return rules;
 }

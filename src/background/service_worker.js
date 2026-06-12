@@ -1,7 +1,7 @@
-import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS } from "../shared/constants.js";
+import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS, X_LIMIT } from "../shared/constants.js";
 import { getSettings, getRuntimeState, setRuntimeState } from "../shared/storage.js";
-import { buildBlockingRules, replaceDynamicRules } from "./dnr.js";
-import { sendHeartbeat, reportDisabled, HEARTBEAT_MINUTES } from "../shared/report.js";
+import { buildBlockingRules, buildXLimitRule, replaceDynamicRules } from "./dnr.js";
+import { sendHeartbeat, reportDisabled, HEARTBEAT_MINUTES, localDateString } from "../shared/report.js";
 import {
   computeClassWindowsFromEvents,
   fetchEventsForCalendar,
@@ -22,6 +22,123 @@ function isUnlockActive(tempUnlock) {
   return Date.now() < tempUnlock.until;
 }
 
+// --- x.com usage metering ---
+// Time counts while an x.com tab is the active tab of the focused window and the
+// user isn't idle. An open viewing session is `xSession: { startedAt }`; elapsed
+// time gets folded into `xUsage[date][am|pm]` on every signal (tab/focus/idle
+// change, heartbeat) and the session restarts — so a dead service worker can
+// lose at most one heartbeat interval of accounting.
+
+function currentPeriod(now = new Date()) {
+  return now.getHours() < 12 ? "am" : "pm";
+}
+
+function xRemainingMs(xUsage, period = currentPeriod(), now = new Date()) {
+  const used = xUsage?.[localDateString(now)]?.[period] || 0;
+  return Math.max(0, X_LIMIT.budgetMinutes * 60 * 1000 - used);
+}
+
+// Attribute [startMs, endMs) of viewing to date+period buckets, splitting at noon
+// and midnight so a session that crosses a boundary charges each side correctly.
+function foldIntoUsage(xUsage, startMs, endMs) {
+  const usage = { ...(xUsage || {}) };
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const d = new Date(cursor);
+    const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const boundary = cursor < noon ? noon : midnight;
+    const chunkEnd = Math.min(endMs, boundary);
+    const key = localDateString(d);
+    const day = { am: 0, pm: 0, ...(usage[key] || {}) };
+    day[currentPeriod(d)] += chunkEnd - cursor;
+    usage[key] = day;
+    cursor = chunkEnd;
+  }
+  // Only today's buckets matter for the budget; drop the rest.
+  const today = localDateString();
+  return usage[today] ? { [today]: usage[today] } : {};
+}
+
+// Fold the open viewing session (if any) into the usage buckets. If we're waking
+// from a gap with no heartbeats (system sleep, browser closed), only count up to
+// the last time the extension was known alive — the user wasn't viewing then.
+async function reconcileXUsage(now = Date.now()) {
+  const { xSession, xUsage } = await getRuntimeState();
+  if (!xSession) return;
+  const { lastAliveAt } = await chrome.storage.local.get("lastAliveAt");
+  let end = now;
+  if (lastAliveAt) {
+    end = Math.min(end, Math.max(xSession.startedAt, lastAliveAt + X_LIMIT.aliveSlackMs));
+  }
+  const usage = foldIntoUsage(xUsage, xSession.startedAt, Math.max(xSession.startedAt, end));
+  await setRuntimeState({ xUsage: usage, xSession: null });
+}
+
+function isXUrl(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === X_LIMIT.domain || host.endsWith("." + X_LIMIT.domain);
+  } catch {
+    return false;
+  }
+}
+
+async function isViewingX() {
+  try {
+    const idleState = await chrome.idle.queryState(X_LIMIT.idleDetectionSeconds);
+    if (idleState !== "active") return false;
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.url || !isXUrl(tab.url)) return false;
+    const win = await chrome.windows.get(tab.windowId);
+    return Boolean(win.focused);
+  } catch {
+    return false;
+  }
+}
+
+// DNR only stops navigations — an already-loaded SPA would keep working through
+// its XHRs — so bounce any open x.com tabs once the budget is spent.
+async function kickXTabs() {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [`*://${X_LIMIT.domain}/*`, `*://*.${X_LIMIT.domain}/*`]
+    });
+    await Promise.all(tabs.map((t) => chrome.tabs.update(t.id, { url: "about:blank" })));
+  } catch {}
+}
+
+// Recompute metering after any signal: settle the open session, then either start
+// a new one (still viewing, budget left) with an alarm at the exhaustion moment,
+// or enforce the block (budget spent).
+async function evaluateXSession() {
+  const now = Date.now();
+  await reconcileXUsage(now);
+  const { xUsage } = await getRuntimeState();
+  const remaining = xRemainingMs(xUsage);
+  const viewing = await isViewingX();
+
+  if (viewing && remaining > 0) {
+    await setRuntimeState({ xSession: { startedAt: now } });
+    await chrome.alarms.create(ALARM_NAMES.xBudgetExhausted, { when: now + remaining + 250 });
+  } else {
+    await chrome.alarms.clear(ALARM_NAMES.xBudgetExhausted);
+  }
+
+  if (remaining <= 0) {
+    await updateBlockingBasedOnState();
+    await kickXTabs();
+  }
+}
+
+// Serialize evaluations: concurrent signals (tab switch + focus change) could
+// otherwise read the same open session and fold it twice.
+let xEvalChain = Promise.resolve();
+function scheduleXEval() {
+  xEvalChain = xEvalChain.then(() => evaluateXSession()).catch(() => {});
+  return xEvalChain;
+}
+
 function tiersUsedToday(unlockLog) {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -36,7 +153,7 @@ function tiersUsedToday(unlockLog) {
 
 async function updateBlockingBasedOnState() {
   const { blockedDomains, allowedDomains } = await getSettings();
-  const { cachedClassWindows, tempUnlock } = await getRuntimeState();
+  const { cachedClassWindows, tempUnlock, xUsage } = await getRuntimeState();
   const inClass = isInClassAt(cachedClassWindows, Date.now());
   const unlock = isUnlockActive(tempUnlock) ? tempUnlock : null;
 
@@ -46,28 +163,34 @@ async function updateBlockingBasedOnState() {
     await setRuntimeState({ tempUnlock: null });
   }
 
+  // The x.com cap rule rides along in every state: reachable while budget remains
+  // in the current half-day (even if the lists block it), hard-blocked once it's
+  // spent (even in class or during an unlock).
+  const xRemaining = xRemainingMs(xUsage);
+  const xRule = buildXLimitRule(X_LIMIT.domain, xRemaining > 0);
+
   if (inClass) {
-    await replaceDynamicRules([]);
-    return { inClass, rulesApplied: 0, unlockActive: !!unlock };
+    await replaceDynamicRules([xRule]);
+    return { inClass, rulesApplied: 1, unlockActive: !!unlock, xRemainingMs: xRemaining };
   }
 
   if (unlock && unlock.type === "all") {
-    // Full unlock — remove all blocking rules
-    await replaceDynamicRules([]);
-    return { inClass, rulesApplied: 0, unlockActive: true };
+    // Full unlock — remove all blocking rules (except the x.com cap)
+    await replaceDynamicRules([xRule]);
+    return { inClass, rulesApplied: 1, unlockActive: true, xRemainingMs: xRemaining };
   }
 
   if (unlock && unlock.type === "site") {
     // Unblock a specific site by adding it to the allowed list temporarily
     const tempAllowed = [...allowedDomains, unlock.site];
-    const rules = buildBlockingRules(blockedDomains, tempAllowed);
+    const rules = [...buildBlockingRules(blockedDomains, tempAllowed), xRule];
     await replaceDynamicRules(rules);
-    return { inClass, rulesApplied: rules.length, unlockActive: true };
+    return { inClass, rulesApplied: rules.length, unlockActive: true, xRemainingMs: xRemaining };
   }
 
-  const rules = buildBlockingRules(blockedDomains, allowedDomains);
+  const rules = [...buildBlockingRules(blockedDomains, allowedDomains), xRule];
   await replaceDynamicRules(rules);
-  return { inClass, rulesApplied: rules.length, unlockActive: false };
+  return { inClass, rulesApplied: rules.length, unlockActive: false, xRemainingMs: xRemaining };
 }
 
 async function scheduleBoundaryRecheck() {
@@ -130,6 +253,7 @@ async function ensurePeriodicAlarm() {
 async function heartbeatTick() {
   let status = null;
   try {
+    await scheduleXEval(); // checkpoint x.com viewing time every heartbeat
     status = await updateBlockingBasedOnState();
   } catch {
     // Reporting liveness matters even if a rule refresh failed.
@@ -197,6 +321,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       await setRuntimeState({ tempUnlock: null });
       await updateBlockingBasedOnState();
     })();
+    return;
+  }
+  if (alarm.name === ALARM_NAMES.xBudgetExhausted) {
+    void scheduleXEval();
   }
 });
 
@@ -298,6 +426,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true;
   }
+  if (msg?.type === "GET_X_STATUS") {
+    void (async () => {
+      await scheduleXEval(); // settle the open session so the numbers are current
+      const { xUsage, xSession } = await getRuntimeState();
+      sendResponse({
+        ok: true,
+        period: currentPeriod(),
+        counting: Boolean(xSession),
+        remaining: {
+          am: xRemainingMs(xUsage, "am"),
+          pm: xRemainingMs(xUsage, "pm")
+        }
+      });
+    })();
+    return true;
+  }
   if (msg?.type === "CLEAR_UNLOCK_LOG") {
     void (async () => {
       await setRuntimeState({ unlockLog: [] });
@@ -307,6 +451,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+// Signals that x.com viewing may have started or stopped.
+chrome.tabs.onActivated.addListener(() => void scheduleXEval());
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.url && tab.active) void scheduleXEval();
+});
+chrome.windows.onFocusChanged.addListener(() => void scheduleXEval());
+chrome.idle.setDetectionInterval(X_LIMIT.idleDetectionSeconds);
+chrome.idle.onStateChanged.addListener(() => void scheduleXEval());
 
 // Runs on every service-worker start (install, browser launch, alarm wake, or a manual
 // re-enable). Make sure the alarms exist, flag a manual re-enable, and report liveness.
