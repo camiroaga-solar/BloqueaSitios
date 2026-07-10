@@ -51,3 +51,35 @@ export async function reportDisabled({ gapStart, gapEnd } = {}) {
     reason: "re-enabled"
   });
 }
+
+// Returns the currently active pomodoro session (or null). Polled each heartbeat
+// so the extension only samples tabs while Iñaki is running a pomodoro.
+export async function getActivePomodoro() {
+  if (!APP_BASE_URL || APP_BASE_URL.includes("REPLACE_ME")) return null;
+  try {
+    const r = await fetch(`${APP_BASE_URL}/api/pomodoro-session`, { method: "GET" });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d && d.active ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+// Reports the active tab (domain + title only) into the running pomodoro so the
+// AI can judge whether the session was real work.
+export async function sendPomodoroSample({ sessionId, host, title }) {
+  if (!APP_BASE_URL || APP_BASE_URL.includes("REPLACE_ME")) return;
+  try {
+    await fetch(`${APP_BASE_URL}/api/pomodoro-session`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-blocker-token": BLOCKER_TOKEN
+      },
+      body: JSON.stringify({ action: "sample", sessionId, host, title, at: Date.now() })
+    });
+  } catch {
+    // Network errors are expected (offline, server down) — ignore.
+  }
+}

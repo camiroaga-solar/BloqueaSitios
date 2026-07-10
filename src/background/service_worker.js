@@ -1,7 +1,7 @@
 import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS, X_LIMIT } from "../shared/constants.js";
 import { getSettings, getRuntimeState, setRuntimeState } from "../shared/storage.js";
 import { buildBlockingRules, buildXLimitRule, replaceDynamicRules } from "./dnr.js";
-import { sendHeartbeat, reportDisabled, HEARTBEAT_MINUTES, localDateString } from "../shared/report.js";
+import { sendHeartbeat, reportDisabled, getActivePomodoro, sendPomodoroSample, HEARTBEAT_MINUTES, localDateString } from "../shared/report.js";
 import {
   computeClassWindowsFromEvents,
   fetchEventsForCalendar,
@@ -25,32 +25,44 @@ function isUnlockActive(tempUnlock) {
 // --- x.com usage metering ---
 // Time counts while an x.com tab is the active tab of the focused window and the
 // user isn't idle. An open viewing session is `xSession: { startedAt }`; elapsed
-// time gets folded into `xUsage[date][am|pm]` on every signal (tab/focus/idle
+// time gets folded into `xUsage[date][period]` on every signal (tab/focus/idle
 // change, heartbeat) and the session restarts — so a dead service worker can
 // lose at most one heartbeat interval of accounting.
 
-function currentPeriod(now = new Date()) {
-  return now.getHours() < 12 ? "am" : "pm";
+function periodFor(now = new Date()) {
+  const h = now.getHours();
+  return X_LIMIT.periods.find((p) => h >= p.startHour && h < p.endHour);
 }
+
+function currentPeriod(now = new Date()) {
+  return periodFor(now).id;
+}
+
+// Local-time instant at which the period containing `cursor` ends. endHour 24
+// resolves to next-day midnight via Date's overflow handling.
+function periodEndMs(cursor) {
+  const d = new Date(cursor);
+  const { endHour } = periodFor(d);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), endHour).getTime();
+}
+
+const emptyDay = () => Object.fromEntries(X_LIMIT.periods.map((p) => [p.id, 0]));
 
 function xRemainingMs(xUsage, period = currentPeriod(), now = new Date()) {
   const used = xUsage?.[localDateString(now)]?.[period] || 0;
   return Math.max(0, X_LIMIT.budgetMinutes * 60 * 1000 - used);
 }
 
-// Attribute [startMs, endMs) of viewing to date+period buckets, splitting at noon
-// and midnight so a session that crosses a boundary charges each side correctly.
+// Attribute [startMs, endMs) of viewing to date+period buckets, splitting at each
+// period boundary so a session that crosses one charges each side correctly.
 function foldIntoUsage(xUsage, startMs, endMs) {
   const usage = { ...(xUsage || {}) };
   let cursor = startMs;
   while (cursor < endMs) {
     const d = new Date(cursor);
-    const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
-    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-    const boundary = cursor < noon ? noon : midnight;
-    const chunkEnd = Math.min(endMs, boundary);
+    const chunkEnd = Math.min(endMs, periodEndMs(cursor));
     const key = localDateString(d);
-    const day = { am: 0, pm: 0, ...(usage[key] || {}) };
+    const day = { ...emptyDay(), ...(usage[key] || {}) };
     day[currentPeriod(d)] += chunkEnd - cursor;
     usage[key] = day;
     cursor = chunkEnd;
@@ -164,7 +176,7 @@ async function updateBlockingBasedOnState() {
   }
 
   // The x.com cap rule rides along in every state: reachable while budget remains
-  // in the current half-day (even if the lists block it), hard-blocked once it's
+  // in the current period (even if the lists block it), hard-blocked once it's
   // spent (even in class or during an unlock).
   const xRemaining = xRemainingMs(xUsage);
   const xRule = buildXLimitRule(X_LIMIT.domain, xRemaining > 0);
@@ -260,6 +272,25 @@ async function heartbeatTick() {
   }
   await chrome.storage.local.set({ lastAliveAt: Date.now() });
   await sendHeartbeat(status);
+  await samplePomodoroTab();
+}
+
+// If a pomodoro is running, report the active tab's domain + title — but only
+// when the user is actually at the keyboard, so AFK time doesn't count as work.
+async function samplePomodoroTab() {
+  try {
+    const pomo = await getActivePomodoro();
+    if (!pomo) return;
+    const idleState = await chrome.idle.queryState(60);
+    if (idleState !== "active") return;
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab || !tab.url || !/^https?:/i.test(tab.url)) return; // skip chrome:// and extension pages
+    let host = "";
+    try { host = new URL(tab.url).hostname; } catch { return; }
+    await sendPomodoroSample({ sessionId: pomo.sessionId, host, title: tab.title || "" });
+  } catch {
+    // Sampling is best-effort; never let it break the heartbeat.
+  }
 }
 
 // Detect "the user disabled the extension and re-enabled it" without false-positiving on
@@ -434,10 +465,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         ok: true,
         period: currentPeriod(),
         counting: Boolean(xSession),
-        remaining: {
-          am: xRemainingMs(xUsage, "am"),
-          pm: xRemainingMs(xUsage, "pm")
-        }
+        remaining: Object.fromEntries(
+          X_LIMIT.periods.map((p) => [p.id, xRemainingMs(xUsage, p.id)])
+        )
       });
     })();
     return true;
