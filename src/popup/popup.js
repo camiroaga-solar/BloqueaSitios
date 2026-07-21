@@ -1,6 +1,6 @@
 import { getRuntimeState } from "../shared/storage.js";
 import { isInClassAt, nextBoundaryAfter } from "../background/calendar_api.js";
-import { UNLOCK_TIERS } from "../shared/constants.js";
+import { UNLOCK_TIERS, X_LIMIT } from "../shared/constants.js";
 
 function fmtTime(ms) {
   try {
@@ -84,12 +84,15 @@ async function refresh() {
     if (xResp?.ok) {
       const xStatusEl = document.getElementById("xStatus");
       const slot = (ms) => (ms < 1000 ? "used up" : `${fmtBudget(ms)} left`);
-      xStatusEl.textContent = `AM: ${slot(xResp.remaining.am)} · PM: ${slot(xResp.remaining.pm)}`;
+      xStatusEl.textContent = X_LIMIT.periods
+        .map((p) => `${p.label}: ${slot(xResp.remaining[p.id])}`)
+        .join(" · ");
 
       if (xResp.counting) {
+        const period = X_LIMIT.periods.find((p) => p.id === xResp.period);
         const xLine = document.createElement("div");
         xLine.textContent = `x.com open — ${fmtBudget(xResp.remaining[xResp.period])} left this ${
-          xResp.period === "am" ? "morning" : "afternoon"
+          period ? period.label : xResp.period
         }`;
         xLine.className = "status-line ok";
         statusEl.appendChild(xLine);
@@ -184,12 +187,20 @@ function setupUnlockForm() {
           setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
           return;
         }
+        if (!resp?.ok) {
+          // Don't silently treat a failed unlock as success — surface it.
+          console.error("TEMP_UNLOCK failed:", resp?.error);
+          btn.textContent = "Error";
+          setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
+          return;
+        }
         // Reset form
         typeSelect.value = "all";
         siteGroup.classList.add("hidden");
         siteInput.value = "";
         await refresh();
-      } catch {
+      } catch (e) {
+        console.error("TEMP_UNLOCK error:", e);
         btn.textContent = "Error";
         setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
       }

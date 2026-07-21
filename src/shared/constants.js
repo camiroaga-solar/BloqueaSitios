@@ -26,14 +26,23 @@ export const DEFAULTS = {
   xUsage: {}
 };
 
-// Special-case cap: x.com is usable for 15 minutes total in the AM and 15 in the
-// PM, independent of the block/allow lists, unlock tiers, and class windows.
-// Usage is metered automatically — time only counts while an x.com tab is the
-// active tab of the focused window and the user isn't idle — and once the budget
-// is spent, x.com is hard-blocked until the next half-day.
+// Special-case cap: x.com is usable for budgetMinutes total in each of the daily
+// periods below, independent of the block/allow lists, unlock tiers, and class
+// windows. Usage is metered automatically — time only counts while an x.com tab
+// is the active tab of the focused window and the user isn't idle — and once a
+// period's budget is spent, x.com is hard-blocked until the next period.
+//
+// Periods partition the local day by hour into half-open [startHour, endHour)
+// spans; the last one ends at 24 (next midnight). They must be contiguous and
+// cover 0–24 so every moment maps to exactly one period.
 export const X_LIMIT = {
   domain: "x.com",
-  budgetMinutes: 15,
+  budgetMinutes: 12,
+  periods: [
+    { id: "morning", label: "morning", startHour: 0, endHour: 12 },
+    { id: "afternoon", label: "afternoon", startHour: 12, endHour: 20 },
+    { id: "evening", label: "evening", startHour: 20, endHour: 24 }
+  ],
   idleDetectionSeconds: 60,
   // When reconciling after a gap with no heartbeats (system sleep, browser
   // closed), only count viewing time up to lastAliveAt plus this slack.
@@ -41,12 +50,9 @@ export const X_LIMIT = {
 };
 
 export const UNLOCK_TIERS = [
-  { id: "m5a", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
-  { id: "m5b", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
-  { id: "m15a", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
-  { id: "m15b", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
-  { id: "h1a", label: "1 hour", delayMinutes: 0, durationMinutes: 60 },
-  { id: "h1b", label: "1 hour", delayMinutes: 0, durationMinutes: 60 }
+  { id: "m5", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
+  { id: "m15", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
+  { id: "h1", label: "1 hour", delayMinutes: 0, durationMinutes: 60 }
 ];
 
 // Embed exceptions: these sites may load the listed domains inside iframes
