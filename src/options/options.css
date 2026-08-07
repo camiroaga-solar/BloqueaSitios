@@ -71,6 +71,29 @@ h2 {
   line-height: 1.4;
 }
 
+.pinned {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  cursor: not-allowed;
+  user-select: none;
+}
+
+.pinned code {
+  color: var(--text);
+  font-size: 1.05em;
+}
+
+.pinned-note {
+  color: var(--hint);
+  font-size: 13px;
+}
+
 .row {
   display: flex;
   align-items: center;

@@ -1,6 +1,7 @@
-import { ALARM_NAMES, CALENDAR_SYNC, UNLOCK_TIERS, X_LIMIT } from "../shared/constants.js";
+import { ALARM_NAMES, CALENDAR_SYNC, X_LIMIT } from "../shared/constants.js";
 import { getSettings, getRuntimeState, setRuntimeState } from "../shared/storage.js";
-import { buildBlockingRules, buildXLimitRule, replaceDynamicRules } from "./dnr.js";
+import { buildBlockingRules, buildCurfewRule, buildXLimitRule, replaceDynamicRules } from "./dnr.js";
+import { isInCurfewAt, nextCurfewBoundaryAfter } from "../shared/curfew.js";
 import { sendHeartbeat, reportDisabled, getActivePomodoro, sendPomodoroSample, HEARTBEAT_MINUTES, localDateString } from "../shared/report.js";
 import {
   computeClassWindowsFromEvents,
@@ -15,11 +16,16 @@ import {
 let sawStartup = false;
 let sawInstallOrUpdate = false;
 
-function isUnlockActive(tempUnlock) {
-  if (!tempUnlock) return false;
-  // Not yet activated (waiting for delay)
-  if (tempUnlock.activatesAt && Date.now() < tempUnlock.activatesAt) return false;
-  return Date.now() < tempUnlock.until;
+// There is deliberately no way to grant a temporary unlock: no UI, no message
+// handler, and no code path that reads a stored unlock. Blocking is decided by
+// the calendar and the x.com budget alone. Any `tempUnlock` left in storage from
+// an older version is inert and gets purged on boot.
+async function purgeLegacyUnlock() {
+  try {
+    await chrome.storage.local.remove("tempUnlock");
+    await chrome.alarms.clear("tempUnlockExpiry");
+    await chrome.alarms.clear("tempUnlockDelayActivate");
+  } catch {}
 }
 
 // --- x.com usage metering ---
@@ -120,6 +126,16 @@ async function kickXTabs() {
   } catch {}
 }
 
+// Same reasoning for the curfew, but for every site: a page loaded at 22:59 would
+// otherwise stay usable all night. chrome:// and extension pages are left alone.
+// Idempotent — once a tab is on about:blank there is nothing left to kick.
+async function kickAllTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    await Promise.all(tabs.map((t) => chrome.tabs.update(t.id, { url: "about:blank" })));
+  } catch {}
+}
+
 // Recompute metering after any signal: settle the open session, then either start
 // a new one (still viewing, budget left) with an alarm at the exhaustion moment,
 // or enforce the block (budget spent).
@@ -151,65 +167,51 @@ function scheduleXEval() {
   return xEvalChain;
 }
 
-function tiersUsedToday(unlockLog) {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const used = new Set();
-  for (const e of unlockLog || []) {
-    if (new Date(e.grantedAt).getTime() >= startOfDay && e.tier) {
-      used.add(e.tier);
-    }
-  }
-  return used;
-}
-
 async function updateBlockingBasedOnState() {
   const { blockedDomains, allowedDomains } = await getSettings();
-  const { cachedClassWindows, tempUnlock, xUsage } = await getRuntimeState();
+  const { cachedClassWindows, xUsage } = await getRuntimeState();
   const inClass = isInClassAt(cachedClassWindows, Date.now());
-  const unlock = isUnlockActive(tempUnlock) ? tempUnlock : null;
-
-  // Clear expired unlock (but not pending/delayed ones)
-  const isPending = tempUnlock?.activatesAt && Date.now() < tempUnlock.activatesAt;
-  if (tempUnlock && !unlock && !isPending) {
-    await setRuntimeState({ tempUnlock: null });
-  }
 
   // The x.com cap rule rides along in every state: reachable while budget remains
   // in the current period (even if the lists block it), hard-blocked once it's
-  // spent (even in class or during an unlock).
+  // spent (even in class).
   const xRemaining = xRemainingMs(xUsage);
   const xRule = buildXLimitRule(X_LIMIT.domain, xRemaining > 0);
 
+  // Checked before everything else, and applied as the only rule: the curfew
+  // takes no exceptions, so class windows and the allowlist don't get a look in.
+  if (isInCurfewAt()) {
+    await replaceDynamicRules([buildCurfewRule()]);
+    await kickAllTabs();
+    return { inClass, curfew: true, rulesApplied: 1, unlockActive: false, xRemainingMs: xRemaining };
+  }
+
   if (inClass) {
     await replaceDynamicRules([xRule]);
-    return { inClass, rulesApplied: 1, unlockActive: !!unlock, xRemainingMs: xRemaining };
-  }
-
-  if (unlock && unlock.type === "all") {
-    // Full unlock — remove all blocking rules (except the x.com cap)
-    await replaceDynamicRules([xRule]);
-    return { inClass, rulesApplied: 1, unlockActive: true, xRemainingMs: xRemaining };
-  }
-
-  if (unlock && unlock.type === "site") {
-    // Unblock a specific site by adding it to the allowed list temporarily
-    const tempAllowed = [...allowedDomains, unlock.site];
-    const rules = [...buildBlockingRules(blockedDomains, tempAllowed), xRule];
-    await replaceDynamicRules(rules);
-    return { inClass, rulesApplied: rules.length, unlockActive: true, xRemainingMs: xRemaining };
+    return { inClass, curfew: false, rulesApplied: 1, unlockActive: false, xRemainingMs: xRemaining };
   }
 
   const rules = [...buildBlockingRules(blockedDomains, allowedDomains), xRule];
   await replaceDynamicRules(rules);
-  return { inClass, rulesApplied: rules.length, unlockActive: false, xRemainingMs: xRemaining };
+  return {
+    inClass,
+    curfew: false,
+    rulesApplied: rules.length,
+    unlockActive: false,
+    xRemainingMs: xRemaining
+  };
 }
 
+// Wake at whichever comes first: a class window starting/ending, or the curfew
+// switching on/off. The curfew always has a next boundary, so unlike before
+// there is always an alarm pending.
 async function scheduleBoundaryRecheck() {
   const { cachedClassWindows } = await getRuntimeState();
-  const nextMs = nextBoundaryAfter(cachedClassWindows, Date.now());
+  const now = Date.now();
+  const classNext = nextBoundaryAfter(cachedClassWindows, now);
+  const curfewNext = nextCurfewBoundaryAfter(now);
+  const nextMs = classNext ? Math.min(classNext, curfewNext) : curfewNext;
   await chrome.alarms.clear(ALARM_NAMES.boundaryRecheck);
-  if (!nextMs) return;
   const when = nextMs + CALENDAR_SYNC.boundarySlackSeconds * 1000;
   await chrome.alarms.create(ALARM_NAMES.boundaryRecheck, { when });
 }
@@ -313,6 +315,7 @@ async function checkDisabledOnBoot() {
 }
 
 async function reevalAll({ interactive }) {
+  await purgeLegacyUnlock();
   await ensurePeriodicAlarm();
   await syncCalendar({ interactive });
   await updateBlockingBasedOnState();
@@ -342,18 +345,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void updateBlockingBasedOnState().then(() => scheduleBoundaryRecheck());
     return;
   }
-  if (alarm.name === ALARM_NAMES.tempUnlockDelayActivate) {
-    // Delay period over — apply the unlock now
-    void updateBlockingBasedOnState();
-    return;
-  }
-  if (alarm.name === ALARM_NAMES.tempUnlockExpiry) {
-    void (async () => {
-      await setRuntimeState({ tempUnlock: null });
-      await updateBlockingBasedOnState();
-    })();
-    return;
-  }
   if (alarm.name === ALARM_NAMES.xBudgetExhausted) {
     void scheduleXEval();
   }
@@ -381,66 +372,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     void updateBlockingBasedOnState().then((r) => sendResponse({ ok: true, ...r }));
     return true;
   }
-  if (msg?.type === "TEMP_UNLOCK") {
-    void (async () => {
-      try {
-        const { unlockType, site, tier } = msg;
-        const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
-        if (!tierDef) {
-          sendResponse({ ok: false, error: "INVALID_TIER" });
-          return;
-        }
-        const { unlockLog } = await getRuntimeState();
-        const used = tiersUsedToday(unlockLog);
-        if (used.has(tier)) {
-          sendResponse({ ok: false, error: "TIER_USED" });
-          return;
-        }
-        const now = Date.now();
-        const delayMs = tierDef.delayMinutes * 60 * 1000;
-        const durationMinutes = tierDef.durationMinutes;
-        const activatesAt = delayMs > 0 ? now + delayMs : now;
-        const until = activatesAt + durationMinutes * 60 * 1000;
-        const unlock = {
-          type: unlockType, // "site" or "all"
-          site: unlockType === "site" ? site : null,
-          tier,
-          grantedAt: now,
-          activatesAt: delayMs > 0 ? activatesAt : null,
-          until
-        };
-        await setRuntimeState({ tempUnlock: unlock });
-        const logEntry = {
-          type: unlockType,
-          site: unlock.site,
-          tier,
-          grantedAt: new Date(now).toISOString(),
-          durationMinutes,
-          expiresAt: new Date(until).toISOString()
-        };
-        await setRuntimeState({ unlockLog: [...unlockLog, logEntry] });
-        if (delayMs > 0) {
-          await chrome.alarms.create(ALARM_NAMES.tempUnlockDelayActivate, { when: activatesAt });
-        }
-        await chrome.alarms.create(ALARM_NAMES.tempUnlockExpiry, { when: until });
-        await updateBlockingBasedOnState();
-        sendResponse({ ok: true });
-      } catch (err) {
-        sendResponse({ ok: false, error: String(err?.message || err) });
-      }
-    })();
-    return true;
-  }
-  if (msg?.type === "CANCEL_UNLOCK") {
-    void (async () => {
-      await chrome.alarms.clear(ALARM_NAMES.tempUnlockDelayActivate);
-      await chrome.alarms.clear(ALARM_NAMES.tempUnlockExpiry);
-      await setRuntimeState({ tempUnlock: null });
-      await updateBlockingBasedOnState();
-      sendResponse({ ok: true });
-    })();
-    return true;
-  }
+  // Read-only: the log keeps the history of unlocks granted before the feature
+  // was removed. Nothing can add to it.
   if (msg?.type === "GET_UNLOCK_LOG") {
     void (async () => {
       const { unlockLog } = await getRuntimeState();
@@ -448,12 +381,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true;
   }
-  if (msg?.type === "GET_UNLOCKS_TODAY") {
+  // Ground truth for the popup: re-apply the rules, then read back what Chrome
+  // actually holds. Computing the state in the popup instead would let it claim
+  // "blocked" while the worker was running stale code with stale rules.
+  if (msg?.type === "GET_STATUS") {
     void (async () => {
-      const { unlockLog } = await getRuntimeState();
-      const used = tiersUsedToday(unlockLog);
-      // Return which tier ids have been used today
-      sendResponse({ ok: true, usedTiers: [...used] });
+      try {
+        const state = await updateBlockingBasedOnState();
+        const active = await chrome.declarativeNetRequest.getDynamicRules();
+        sendResponse({ ok: true, ...state, activeRules: active.length });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
     })();
     return true;
   }

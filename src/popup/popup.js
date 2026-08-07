@@ -1,6 +1,7 @@
 import { getRuntimeState } from "../shared/storage.js";
 import { isInClassAt, nextBoundaryAfter } from "../background/calendar_api.js";
-import { UNLOCK_TIERS, X_LIMIT } from "../shared/constants.js";
+import { CURFEW, X_LIMIT } from "../shared/constants.js";
+import { isInCurfewAt, fmtHour } from "../shared/curfew.js";
 
 function fmtTime(ms) {
   try {
@@ -19,63 +20,48 @@ function fmtBudget(ms) {
   return `${s}s`;
 }
 
-function fmtDuration(ms) {
-  const mins = Math.max(0, Math.ceil(ms / 60000));
-  if (mins < 60) return `${mins}m`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
 async function refresh() {
   const state = await getRuntimeState();
   const windows = state.cachedClassWindows || [];
-  const inClass = isInClassAt(windows, Date.now());
   const next = nextBoundaryAfter(windows, Date.now());
-  const tempUnlock = state.tempUnlock;
-  const unlockActive = tempUnlock && Date.now() < tempUnlock.until;
 
   const statusEl = document.getElementById("status");
   const detailEl = document.getElementById("detail");
-  const banner = document.getElementById("unlockBanner");
-  const bannerText = document.getElementById("unlockBannerText");
 
-  // Line 1: class state
-  const classLine = inClass
-    ? "In class — sites unblocked"
-    : "Not in class — sites blocked";
+  // Ask the worker what it actually enforced rather than recomputing it here —
+  // otherwise this line reports the schedule, not reality, and says "blocked"
+  // even when no rules are applied. Falls back to local time if it can't answer.
+  let applied = null;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
+    if (resp?.ok) applied = resp;
+  } catch {}
 
-  // Line 2: temp unlock state
-  const unlockPending = tempUnlock && tempUnlock.activatesAt && Date.now() < tempUnlock.activatesAt;
-  let unlockLine = "";
-  if (unlockPending) {
-    const waitLeft = tempUnlock.activatesAt - Date.now();
-    const target = tempUnlock.type === "all" ? "all sites" : tempUnlock.site;
-    unlockLine = `Unlock pending: ${target} — activates in ${fmtDuration(waitLeft)}`;
-  } else if (unlockActive) {
-    const remaining = tempUnlock.until - Date.now();
-    const target = tempUnlock.type === "all" ? "all sites" : tempUnlock.site;
-    unlockLine = `Temp unlock: ${target} — ${fmtDuration(remaining)} left`;
-  }
+  const inCurfew = applied ? applied.curfew : isInCurfewAt();
+  const inClass = applied ? applied.inClass : isInClassAt(windows, Date.now());
 
-  // Build status with both lines
   statusEl.innerHTML = "";
   const classSpan = document.createElement("div");
-  classSpan.textContent = classLine;
-  classSpan.className = inClass ? "status-line ok" : "status-line blocked";
+  classSpan.textContent = inCurfew
+    ? `Curfew — everything blocked until ${fmtHour(CURFEW.endHour)}`
+    : inClass
+      ? "In class — sites unblocked"
+      : "Not in class — sites blocked";
+  classSpan.className = inCurfew || !inClass ? "status-line blocked" : "status-line ok";
   statusEl.appendChild(classSpan);
 
-  if (unlockLine) {
-    const unlockSpan = document.createElement("div");
-    unlockSpan.textContent = unlockLine;
-    unlockSpan.className = unlockPending ? "status-line pending" : "status-line ok";
-    statusEl.appendChild(unlockSpan);
-    bannerText.textContent = unlockPending
-      ? "Unlock requested — waiting for delay."
-      : "Temporary unlock is active.";
-    banner.classList.remove("hidden");
-  } else {
-    banner.classList.add("hidden");
+  // A live claim of "blocked" is only true if rules are really loaded. If the
+  // worker is unreachable or holding no rules, say so instead of implying safety.
+  if (!applied) {
+    const warn = document.createElement("div");
+    warn.textContent = "⚠ Blocker not responding — reload the extension";
+    warn.className = "status-line blocked";
+    statusEl.appendChild(warn);
+  } else if (applied.activeRules === 0) {
+    const warn = document.createElement("div");
+    warn.textContent = "⚠ No rules active — nothing is being blocked";
+    warn.className = "status-line blocked";
+    statusEl.appendChild(warn);
   }
 
   // X usage state
@@ -99,21 +85,6 @@ async function refresh() {
       }
     }
   } catch {}
-
-  // Update tier button states
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: "GET_UNLOCKS_TODAY" });
-    const usedSet = new Set(resp?.ok ? resp.usedTiers : []);
-    for (const btn of document.querySelectorAll(".tier-btn")) {
-      const tier = btn.dataset.tier;
-      const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
-      const label = tierDef ? tierDef.label : tier;
-      const isUsed = usedSet.has(tier);
-      btn.disabled = isUsed;
-      btn.textContent = isUsed ? `${label} ✓` : label;
-    }
-  } catch {}
-
 
   // Remove top-level color classes (lines handle their own)
   statusEl.classList.remove("ok", "blocked");
@@ -150,74 +121,6 @@ async function syncNow() {
   }
 }
 
-// --- Unlock form ---
-
-function setupUnlockForm() {
-  const typeSelect = document.getElementById("unlockType");
-  const siteGroup = document.getElementById("siteGroup");
-  const siteInput = document.getElementById("unlockSite");
-  const tierBtns = document.querySelectorAll(".tier-btn");
-  const cancelBtn = document.getElementById("cancelUnlock");
-
-  typeSelect.addEventListener("change", () => {
-    siteGroup.classList.toggle("hidden", typeSelect.value !== "site");
-  });
-
-  for (const btn of tierBtns) {
-    btn.addEventListener("click", async () => {
-      const tier = btn.dataset.tier;
-      const tierDef = UNLOCK_TIERS.find((t) => t.id === tier);
-      if (!tierDef) return;
-      // Validate site field if needed
-      if (typeSelect.value === "site" && !siteInput.value.trim()) return;
-
-      btn.disabled = true;
-      const origText = btn.textContent;
-      btn.textContent = "Unlocking…";
-      try {
-        const resp = await chrome.runtime.sendMessage({
-          type: "TEMP_UNLOCK",
-          unlockType: typeSelect.value,
-          site: siteInput.value.trim(),
-          durationMinutes: tierDef.durationMinutes,
-          tier
-        });
-        if (resp?.error === "TIER_USED") {
-          btn.textContent = "Already used today";
-          setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
-          return;
-        }
-        if (!resp?.ok) {
-          // Don't silently treat a failed unlock as success — surface it.
-          console.error("TEMP_UNLOCK failed:", resp?.error);
-          btn.textContent = "Error";
-          setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
-          return;
-        }
-        // Reset form
-        typeSelect.value = "all";
-        siteGroup.classList.add("hidden");
-        siteInput.value = "";
-        await refresh();
-      } catch (e) {
-        console.error("TEMP_UNLOCK error:", e);
-        btn.textContent = "Error";
-        setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000);
-      }
-    });
-  }
-
-  cancelBtn.addEventListener("click", async () => {
-    cancelBtn.disabled = true;
-    try {
-      await chrome.runtime.sendMessage({ type: "CANCEL_UNLOCK" });
-      await refresh();
-    } finally {
-      cancelBtn.disabled = false;
-    }
-  });
-}
-
 // --- Unlock log ---
 
 function setupLog() {
@@ -238,7 +141,7 @@ function setupLog() {
     const resp = await chrome.runtime.sendMessage({ type: "GET_UNLOCK_LOG" });
     const log = resp?.log || [];
     if (log.length === 0) {
-      entriesEl.innerHTML = '<div class="log-empty">No unlock history yet.</div>';
+      entriesEl.innerHTML = '<div class="log-empty">No unlock history.</div>';
       return;
     }
     // Show most recent first, limit to 20
@@ -298,7 +201,6 @@ document.getElementById("openOptions").addEventListener("click", async (e) => {
 });
 
 async function init() {
-  setupUnlockForm();
   setupLog();
   await refresh();
   syncNow();

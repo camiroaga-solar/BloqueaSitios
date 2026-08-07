@@ -1,9 +1,35 @@
-import { EMBED_EXCEPTIONS } from "../shared/constants.js";
+import {
+  EMBED_EXCEPTIONS,
+  GOOGLE_SERVICE_ALLOW,
+  HARD_BLOCK_URL_FILTERS,
+  WILDCARD_BLOCK
+} from "../shared/constants.js";
 
 const BLOCK_RULE_ID_BASE = 1000;
 const ALLOW_RULE_ID_BASE = 2000;
 const X_LIMIT_RULE_ID = 3000;
 const EMBED_ALLOW_RULE_ID_BASE = 4000;
+const GOOGLE_ALLOW_RULE_ID_BASE = 5000;
+const HARD_BLOCK_RULE_ID_BASE = 6000;
+const CURFEW_RULE_ID = 7000;
+const MAGNET_ALLOW_RULE_ID = 8000;
+
+/**
+ * The nightly curfew, as a single block-everything rule. Priority 5 sits above
+ * the allow rules (2), the x.com cap (3) and the hard blocks (4), so nothing can
+ * carve an exception out of it. During curfew this is the *only* rule applied.
+ */
+export function buildCurfewRule() {
+  return {
+    id: CURFEW_RULE_ID,
+    priority: 5,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*",
+      resourceTypes: ["main_frame", "sub_frame"]
+    }
+  };
+}
 
 /**
  * Allow rules for embed exceptions: a blocked domain may still load as an iframe
@@ -180,8 +206,60 @@ export function normalizeDomains(domains) {
   return parseEntries(domains).map((p) => p.domain);
 }
 
+/**
+ * Google services, allowed at the same priority as the user's own allowlist so
+ * they survive the `*` block. Nothing here covers the search surface — see
+ * GOOGLE_SERVICE_ALLOW — and buildHardBlockRules outranks these anyway.
+ */
+function buildGoogleServiceRules() {
+  return parseEntries(GOOGLE_SERVICE_ALLOW)
+    .map((parsed, idx) => ({
+      id: GOOGLE_ALLOW_RULE_ID_BASE + idx,
+      priority: 2,
+      action: { type: "allow" },
+      condition: {
+        urlFilter: buildUrlFilter(parsed),
+        resourceTypes: ["main_frame", "sub_frame"]
+      }
+    }))
+    .filter((r) => r.condition.urlFilter);
+}
+
+/**
+ * Let magnet links reach the user's registered torrent client instead of being
+ * swallowed by the block-everything rule. The left anchor keeps this exception
+ * scoped to the magnet scheme; it does not allow any HTTP(S) site.
+ */
+function buildMagnetAllowRule() {
+  return {
+    id: MAGNET_ALLOW_RULE_ID,
+    priority: 2,
+    action: { type: "allow" },
+    condition: {
+      urlFilter: "|magnet:",
+      resourceTypes: ["main_frame"]
+    }
+  };
+}
+
+/**
+ * Never-allow rules. Priority 4 beats the allow rules (2) and the x.com cap (3),
+ * so these hold even if the domain is hand-added to the allowlist.
+ */
+function buildHardBlockRules() {
+  return HARD_BLOCK_URL_FILTERS.map((urlFilter, idx) => ({
+    id: HARD_BLOCK_RULE_ID_BASE + idx,
+    priority: 4,
+    action: { type: "block" },
+    condition: {
+      urlFilter,
+      resourceTypes: ["main_frame", "sub_frame"]
+    }
+  }));
+}
+
 export function hasWildcardBlock(domains) {
-  return (domains || []).some((d) => String(d).trim() === "*");
+  return (domains || []).some((d) => String(d).trim() === WILDCARD_BLOCK);
 }
 
 export function buildBlockingRules(blockedDomains, allowedDomains = []) {
@@ -236,6 +314,9 @@ export function buildBlockingRules(blockedDomains, allowedDomains = []) {
   }
 
   rules.push(...buildEmbedExceptionRules());
+  rules.push(...buildGoogleServiceRules());
+  rules.push(buildMagnetAllowRule());
+  rules.push(...buildHardBlockRules());
 
   return rules;
 }
@@ -249,7 +330,6 @@ export async function replaceDynamicRules(rules) {
     addRules
   });
 }
-
 
 
 

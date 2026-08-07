@@ -12,36 +12,9 @@
       <div id="status" class="status">Loading…</div>
       <div id="detail" class="detail"></div>
 
-      <!-- Active unlock banner -->
-      <div id="unlockBanner" class="unlock-banner hidden">
-        <div id="unlockBannerText" class="unlock-banner-text"></div>
-        <button id="cancelUnlock" class="btn btn-small danger">Re-lock now</button>
-      </div>
-
       <div class="actions">
         <button id="syncNow" class="btn">Sync calendar</button>
         <a class="btn secondary" href="#" id="openOptions">Settings</a>
-      </div>
-
-      <div class="unlock-section-label">Temp unlock</div>
-      <div id="unlockForm" class="unlock-form">
-        <div class="form-group">
-          <label class="form-label">Unlock type</label>
-          <select id="unlockType" class="form-input">
-            <option value="all">All sites</option>
-            <option value="site">Specific site</option>
-          </select>
-        </div>
-        <div id="siteGroup" class="form-group hidden">
-          <label class="form-label">Site to unblock</label>
-          <input id="unlockSite" type="text" class="form-input" placeholder="e.g. youtube.com" />
-        </div>
-        <div class="form-label">Use an unlock (3 unlocks per day)</div>
-        <div class="tier-buttons">
-          <button class="btn accent tier-btn" data-tier="m5">5 min</button>
-          <button class="btn accent tier-btn" data-tier="m15">15 min</button>
-          <button class="btn accent tier-btn" data-tier="h1">1 hour</button>
-        </div>
       </div>
 
       <div class="unlock-section-label">x.com time</div>
@@ -52,7 +25,7 @@
 
       <!-- Log section -->
       <div class="log-actions">
-        <button id="toggleLog" class="btn-link">View unlock log</button>
+        <button id="toggleLog" class="btn-link">View unlock history</button>
       </div>
       <div id="logSection" class="log-section hidden">
         <div id="logEntries" class="log-entries"></div>

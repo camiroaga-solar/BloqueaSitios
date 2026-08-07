@@ -6,21 +6,24 @@ export const STORAGE_KEYS = {
   cachedClassWindows: "cachedClassWindows",
   lastCalendarSyncAt: "lastCalendarSyncAt",
   lastCalendarSyncError: "lastCalendarSyncError",
-  tempUnlock: "tempUnlock",
   unlockLog: "unlockLog",
   xSession: "xSession",
   xUsage: "xUsage"
 };
 
+// The blocklist entry that blocks every site. It is pinned: storage always reads
+// and writes it back, so the only way through is the allowlist (or a class
+// window). Removing it from the options textarea does nothing.
+export const WILDCARD_BLOCK = "*";
+
 export const DEFAULTS = {
-  blockedDomains: ["youtube.com", "reddit.com", "x.com"],
+  blockedDomains: [WILDCARD_BLOCK, "youtube.com", "reddit.com", "x.com"],
   allowedDomains: [],
   selectedCalendarId: null,
   calendarTimeZone: null,
   cachedClassWindows: [],
   lastCalendarSyncAt: null,
   lastCalendarSyncError: null,
-  tempUnlock: null,
   unlockLog: [],
   xSession: null,
   xUsage: {}
@@ -49,10 +52,75 @@ export const X_LIMIT = {
   aliveSlackMs: 45 * 1000
 };
 
-export const UNLOCK_TIERS = [
-  { id: "m5", label: "5 min", delayMinutes: 0, durationMinutes: 5 },
-  { id: "m15", label: "15 min", delayMinutes: 0, durationMinutes: 15 },
-  { id: "h1", label: "1 hour", delayMinutes: 0, durationMinutes: 60 }
+// Nightly curfew. Between these local hours every site is blocked with no
+// exceptions at all — not the allowlist, not the built-in Google services, not
+// class windows. The window wraps midnight whenever startHour > endHour.
+export const CURFEW = {
+  startHour: 23, // 11:00pm
+  endHour: 6 // 6:00am
+};
+
+// Google services that stay reachable even though `*` blocks everything, without
+// having to trust the allowlist. Deliberately host-scoped: `www.google.com` is
+// NOT here, so Search and Images have no allow rule covering them and stay
+// caught by the wildcard block. Entries match subdomains too, so
+// `cloud.google.com` covers `console.cloud.google.com`.
+export const GOOGLE_SERVICE_ALLOW = [
+  "accounts.google.com", // sign-in — every other service depends on it
+  "myaccount.google.com",
+  "mail.google.com", // Gmail
+  "drive.google.com", // Drive
+  "docs.google.com", // Docs / Sheets / Slides / Forms
+  "calendar.google.com",
+  "meet.google.com",
+  "chat.google.com",
+  "contacts.google.com",
+  "keep.google.com",
+  "photos.google.com",
+  "groups.google.com",
+  "script.google.com", // Apps Script
+  "takeout.google.com",
+  "translate.google.com",
+  "cloud.google.com", // Cloud docs + console.cloud.google.com
+  "firebase.google.com", // + console.firebase.google.com
+  "developers.google.com",
+  "console.developers.google.com",
+  "analytics.google.com",
+  "search.google.com", // Search Console — not web search
+  "research.google.com", // + colab.research.google.com
+  "aistudio.google.com",
+  "gemini.google.com",
+  "maps.google.com",
+  "google.com/maps", // path-scoped: Maps without opening the rest of www
+  "googleusercontent.com", // Drive downloads / Gmail attachments
+  "usercontent.google.com", // Current Drive download host (drive.usercontent.google.com)
+  "googleapis.com",
+  "gstatic.com"
+];
+
+// Google's search surfaces, blocked unconditionally at a priority that outranks
+// every allow rule — so they stay blocked even if google.com or *.google.com
+// ends up on the allowlist. Add ccTLDs here as needed.
+const GOOGLE_SEARCH_DOMAINS = ["google.com", "google.cl"];
+
+// Path prefixes on those domains. The `^` pins the end of the path segment, so
+// `search.google.com/search-console` (Search Console) and
+// `drive.google.com/drive/search` (Drive's own search) are NOT caught — only a
+// path that begins right after the host, e.g. `www.google.com/search?q=…`.
+// Image results live at `/search?tbm=isch`, so `/search` covers them too.
+const GOOGLE_SEARCH_PATHS = [
+  "/search", // web, image, news and video results
+  "/imghp", // Images home
+  "/imgres", // image result viewer
+  "/webhp" // search home with the query box
+];
+
+// Hosts that are search surfaces in their own right.
+const GOOGLE_SEARCH_HOSTS = ["images.google.com", "lens.google.com"];
+
+export const HARD_BLOCK_URL_FILTERS = [
+  ...GOOGLE_SEARCH_DOMAINS.flatMap((d) => GOOGLE_SEARCH_PATHS.map((p) => `||${d}${p}^`)),
+  ...GOOGLE_SEARCH_HOSTS.map((h) => `||${h}^`)
 ];
 
 // Embed exceptions: these sites may load the listed domains inside iframes
@@ -69,8 +137,6 @@ export const EMBED_EXCEPTIONS = [
 export const ALARM_NAMES = {
   periodicSync: "periodicCalendarSync",
   boundaryRecheck: "boundaryRecheck",
-  tempUnlockExpiry: "tempUnlockExpiry",
-  tempUnlockDelayActivate: "tempUnlockDelayActivate",
   xBudgetExhausted: "xBudgetExhausted",
   heartbeat: "blockerHeartbeat"
 };
@@ -82,7 +148,6 @@ export const CALENDAR_SYNC = {
   boundarySlackSeconds: 5,
   graceMinutes: 3 // Keep sites unblocked for this long after a lesson ends
 };
-
 
 
 

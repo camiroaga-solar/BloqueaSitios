@@ -1,4 +1,5 @@
 import { getSettings, getRuntimeState, setBlockedDomains, setAllowedDomains, setSelectedCalendarId } from "../shared/storage.js";
+import { WILDCARD_BLOCK } from "../shared/constants.js";
 
 async function sendMessage(type, payload) {
   return await chrome.runtime.sendMessage({ type, ...payload });
@@ -24,11 +25,22 @@ function setStatus(el, msg) {
   el.textContent = msg || "";
 }
 
+function saveErrorMessage(error) {
+  const message = String(error?.message || error || "Unknown error");
+  if (message.toLowerCase().includes("quotabytesperitem")) {
+    return "Too many entries to sync. Remove some entries and try again.";
+  }
+  return message;
+}
+
 async function loadIntoUI() {
   const settings = await getSettings();
   const state = await getRuntimeState();
 
-  document.getElementById("blockedDomains").value = (settings.blockedDomains || []).join("\n");
+  // The wildcard lives in the pinned row above the textarea, not inside it, so
+  // there is nothing to select-and-delete. setBlockedDomains re-adds it anyway.
+  const extraBlocked = (settings.blockedDomains || []).filter((d) => String(d).trim() !== WILDCARD_BLOCK);
+  document.getElementById("blockedDomains").value = extraBlocked.join("\n");
   document.getElementById("allowedDomains").value = (settings.allowedDomains || []).join("\n");
   document.getElementById("lastSync").textContent = fmtTs(state.lastCalendarSyncAt);
   document.getElementById("lastError").textContent = state.lastCalendarSyncError || "—";
@@ -82,18 +94,33 @@ async function wireHandlers() {
 
   document.getElementById("saveBlocked").addEventListener("click", async () => {
     setStatus(saveBlockedStatus, "Saving…");
-    const domains = parseDomainsFromTextarea(document.getElementById("blockedDomains").value);
-    await setBlockedDomains(domains);
-    await sendMessage("APPLY_BLOCKING", {});
-    setStatus(saveBlockedStatus, "Saved.");
+    try {
+      const domains = parseDomainsFromTextarea(document.getElementById("blockedDomains").value);
+      await setBlockedDomains(domains);
+      await sendMessage("APPLY_BLOCKING", {});
+      setStatus(saveBlockedStatus, "Saved.");
+    } catch (error) {
+      setStatus(saveBlockedStatus, `Failed: ${saveErrorMessage(error)}`);
+    }
   });
 
   document.getElementById("saveAllowed").addEventListener("click", async () => {
     setStatus(saveAllowedStatus, "Saving…");
-    const domains = parseDomainsFromTextarea(document.getElementById("allowedDomains").value);
-    await setAllowedDomains(domains);
-    await sendMessage("APPLY_BLOCKING", {});
-    setStatus(saveAllowedStatus, "Saved.");
+    try {
+      const textarea = document.getElementById("allowedDomains");
+      const domains = parseDomainsFromTextarea(textarea.value);
+      const { savedDomains, ignoredMagnetLinks } = await setAllowedDomains(domains);
+      textarea.value = savedDomains.join("\n");
+      await sendMessage("APPLY_BLOCKING", {});
+      setStatus(
+        saveAllowedStatus,
+        ignoredMagnetLinks
+          ? "Saved. Magnet links are already allowed automatically; pasted magnet URI removed."
+          : "Saved."
+      );
+    } catch (error) {
+      setStatus(saveAllowedStatus, `Failed: ${saveErrorMessage(error)}`);
+    }
   });
 
   document.getElementById("connectGoogle").addEventListener("click", async () => {
@@ -125,5 +152,3 @@ async function main() {
 }
 
 main();
-
-
