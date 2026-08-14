@@ -55,8 +55,8 @@ export async function getRuntimeState() {
     lastCalendarSyncAt: DEFAULTS.lastCalendarSyncAt,
     lastCalendarSyncError: DEFAULTS.lastCalendarSyncError,
     unlockLog: DEFAULTS.unlockLog,
-    xSession: DEFAULTS.xSession,
-    xUsage: DEFAULTS.xUsage
+    meterSessions: DEFAULTS.meterSessions,
+    meterUsage: DEFAULTS.meterUsage
   });
   return result;
 }

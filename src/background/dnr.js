@@ -7,7 +7,7 @@ import {
 
 const BLOCK_RULE_ID_BASE = 1000;
 const ALLOW_RULE_ID_BASE = 2000;
-const X_LIMIT_RULE_ID = 3000;
+const METER_RULE_ID_BASE = 3000;
 const EMBED_ALLOW_RULE_ID_BASE = 4000;
 const GOOGLE_ALLOW_RULE_ID_BASE = 5000;
 const HARD_BLOCK_RULE_ID_BASE = 6000;
@@ -16,7 +16,7 @@ const MAGNET_ALLOW_RULE_ID = 8000;
 
 /**
  * The nightly curfew, as a single block-everything rule. Priority 5 sits above
- * the allow rules (2), the x.com cap (3) and the hard blocks (4), so nothing can
+ * the allow rules (2), the metered caps (3) and the hard blocks (4), so nothing can
  * carve an exception out of it. During curfew this is the *only* rule applied.
  */
 export function buildCurfewRule() {
@@ -51,21 +51,23 @@ function buildEmbedExceptionRules() {
 }
 
 /**
- * The x.com usage cap outranks both list directions: priority 3 beats the
- * allow-list rules (2) and the block-list rules (1), so x.com is reachable
- * while budget remains even if blocked, and blocked once it's spent even if
- * allowed/unlocked.
+ * The metered usage caps outrank both list directions: priority 3 beats the
+ * allow-list rules (2) and the block-list rules (1), so a metered domain is
+ * reachable while budget remains even if blocked, and blocked once it's spent
+ * even if allowed/unlocked.
+ *
+ * Takes `[{ domain, hasBudget }]` — one rule per metered domain, in order.
  */
-export function buildXLimitRule(domain, hasBudget) {
-  return {
-    id: X_LIMIT_RULE_ID,
+export function buildMeterRules(entries) {
+  return (entries || []).map((entry, idx) => ({
+    id: METER_RULE_ID_BASE + idx,
     priority: 3,
-    action: { type: hasBudget ? "allow" : "block" },
+    action: { type: entry.hasBudget ? "allow" : "block" },
     condition: {
-      urlFilter: `||${domain}^`,
+      urlFilter: `||${entry.domain}^`,
       resourceTypes: ["main_frame", "sub_frame"]
     }
-  };
+  }));
 }
 
 /**
@@ -243,7 +245,7 @@ function buildMagnetAllowRule() {
 }
 
 /**
- * Never-allow rules. Priority 4 beats the allow rules (2) and the x.com cap (3),
+ * Never-allow rules. Priority 4 beats the allow rules (2) and the metered caps (3),
  * so these hold even if the domain is hand-added to the allowlist.
  */
 function buildHardBlockRules() {

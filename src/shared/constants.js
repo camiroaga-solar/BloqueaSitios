@@ -7,8 +7,8 @@ export const STORAGE_KEYS = {
   lastCalendarSyncAt: "lastCalendarSyncAt",
   lastCalendarSyncError: "lastCalendarSyncError",
   unlockLog: "unlockLog",
-  xSession: "xSession",
-  xUsage: "xUsage"
+  meterSessions: "meterSessions",
+  meterUsage: "meterUsage"
 };
 
 // The blocklist entry that blocks every site. It is pinned: storage always reads
@@ -17,7 +17,14 @@ export const STORAGE_KEYS = {
 export const WILDCARD_BLOCK = "*";
 
 export const DEFAULTS = {
-  blockedDomains: [WILDCARD_BLOCK, "youtube.com", "reddit.com", "x.com"],
+  blockedDomains: [
+    WILDCARD_BLOCK,
+    "youtube.com",
+    "reddit.com",
+    "x.com",
+    "tiktok.com",
+    "instagram.com"
+  ],
   allowedDomains: [],
   selectedCalendarId: null,
   calendarTimeZone: null,
@@ -25,27 +32,42 @@ export const DEFAULTS = {
   lastCalendarSyncAt: null,
   lastCalendarSyncError: null,
   unlockLog: [],
-  xSession: null,
-  xUsage: {}
+  meterSessions: {},
+  meterUsage: {}
 };
 
-// Special-case cap: x.com is usable for budgetMinutes total in each of the daily
-// periods below, independent of the block/allow lists, unlock tiers, and class
-// windows. Usage is metered automatically — time only counts while an x.com tab
-// is the active tab of the focused window and the user isn't idle — and once a
-// period's budget is spent, x.com is hard-blocked until the next period.
-//
 // Periods partition the local day by hour into half-open [startHour, endHour)
 // spans; the last one ends at 24 (next midnight). They must be contiguous and
 // cover 0–24 so every moment maps to exactly one period.
-export const X_LIMIT = {
-  domain: "x.com",
-  budgetMinutes: 12,
-  periods: [
-    { id: "morning", label: "morning", startHour: 0, endHour: 12 },
-    { id: "afternoon", label: "afternoon", startHour: 12, endHour: 20 },
-    { id: "evening", label: "evening", startHour: 20, endHour: 24 }
-  ],
+const THIRDS_OF_DAY = [
+  { id: "morning", label: "morning", startHour: 0, endHour: 12 },
+  { id: "afternoon", label: "afternoon", startHour: 12, endHour: 20 },
+  { id: "evening", label: "evening", startHour: 20, endHour: 24 }
+];
+
+// One bucket for the whole day: the budget is spent once, not per half-day.
+const WHOLE_DAY = [{ id: "day", label: "today", startHour: 0, endHour: 24 }];
+
+// Special-case caps: each domain here is usable for budgetMinutes total in each
+// of its periods, independent of the block/allow lists, unlock tiers, and class
+// windows. Usage is metered automatically — time only counts while a tab on that
+// domain is the active tab of the focused window and the user isn't idle — and
+// once a period's budget is spent the domain is hard-blocked until the next one.
+//
+// `id` keys the stored usage buckets, so renaming one resets its budget.
+export const METERED_LIMITS = [
+  { id: "x", domain: "x.com", label: "x.com", budgetMinutes: 12, periods: THIRDS_OF_DAY },
+  { id: "tiktok", domain: "tiktok.com", label: "TikTok", budgetMinutes: 8, periods: WHOLE_DAY },
+  {
+    id: "instagram",
+    domain: "instagram.com",
+    label: "Instagram",
+    budgetMinutes: 8,
+    periods: WHOLE_DAY
+  }
+];
+
+export const METER = {
   idleDetectionSeconds: 60,
   // When reconciling after a gap with no heartbeats (system sleep, browser
   // closed), only count viewing time up to lastAliveAt plus this slack.
@@ -137,7 +159,8 @@ export const EMBED_EXCEPTIONS = [
 export const ALARM_NAMES = {
   periodicSync: "periodicCalendarSync",
   boundaryRecheck: "boundaryRecheck",
-  xBudgetExhausted: "xBudgetExhausted",
+  // One alarm per metered limit: `${meterExhaustedPrefix}${limit.id}`.
+  meterExhaustedPrefix: "meterExhausted:",
   heartbeat: "blockerHeartbeat"
 };
 

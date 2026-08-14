@@ -144,10 +144,28 @@ body {
   letter-spacing: 0.03em;
 }
 
-/* X usage */
-.x-status {
+/* Metered usage */
+.meter-status {
   font-size: 13px;
   font-weight: 600;
+}
+
+.meter-row + .meter-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.meter-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.meter-remaining {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.35;
 }
 
 /* Log section */

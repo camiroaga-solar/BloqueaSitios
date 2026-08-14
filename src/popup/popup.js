@@ -1,6 +1,6 @@
 import { getRuntimeState } from "../shared/storage.js";
 import { isInClassAt, nextBoundaryAfter } from "../background/calendar_api.js";
-import { CURFEW, X_LIMIT } from "../shared/constants.js";
+import { CURFEW, METERED_LIMITS } from "../shared/constants.js";
 import { isInCurfewAt, fmtHour } from "../shared/curfew.js";
 
 function fmtTime(ms) {
@@ -64,24 +64,46 @@ async function refresh() {
     statusEl.appendChild(warn);
   }
 
-  // X usage state
+  // Metered sites (x.com, TikTok, Instagram)
   try {
-    const xResp = await chrome.runtime.sendMessage({ type: "GET_X_STATUS" });
-    if (xResp?.ok) {
-      const xStatusEl = document.getElementById("xStatus");
+    const resp = await chrome.runtime.sendMessage({ type: "GET_METER_STATUS" });
+    if (resp?.ok) {
+      const meterEl = document.getElementById("meterStatus");
+      meterEl.innerHTML = "";
       const slot = (ms) => (ms < 1000 ? "used up" : `${fmtBudget(ms)} left`);
-      xStatusEl.textContent = X_LIMIT.periods
-        .map((p) => `${p.label}: ${slot(xResp.remaining[p.id])}`)
-        .join(" · ");
 
-      if (xResp.counting) {
-        const period = X_LIMIT.periods.find((p) => p.id === xResp.period);
-        const xLine = document.createElement("div");
-        xLine.textContent = `x.com open — ${fmtBudget(xResp.remaining[xResp.period])} left this ${
-          period ? period.label : xResp.period
+      for (const limit of METERED_LIMITS) {
+        const state = resp.limits.find((l) => l.id === limit.id);
+        if (!state) continue;
+        // A single period means one budget for the whole day, so drop the label.
+        const perDay = limit.periods.length === 1;
+        const remaining = perDay
+          ? slot(state.remaining[limit.periods[0].id])
+          : limit.periods.map((p) => `${p.label}: ${slot(state.remaining[p.id])}`).join(" · ");
+
+        const row = document.createElement("div");
+        row.className = "meter-row";
+        const name = document.createElement("div");
+        name.className = "meter-name";
+        name.textContent = `${limit.label} — ${limit.budgetMinutes} min${
+          perDay ? "/day" : " per period"
         }`;
-        xLine.className = "status-line ok";
-        statusEl.appendChild(xLine);
+        const detail = document.createElement("div");
+        detail.className = "meter-remaining";
+        detail.textContent = remaining;
+        row.append(name, detail);
+        meterEl.appendChild(row);
+
+        if (state.counting) {
+          const period = limit.periods.find((p) => p.id === state.period);
+          const label = period ? period.label : state.period;
+          const line = document.createElement("div");
+          line.textContent = `${limit.label} open — ${fmtBudget(
+            state.remaining[state.period]
+          )} left ${perDay ? label : `this ${label}`}`;
+          line.className = "status-line ok";
+          statusEl.appendChild(line);
+        }
       }
     }
   } catch {}
