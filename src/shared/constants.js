@@ -23,7 +23,8 @@ export const DEFAULTS = {
     "reddit.com",
     "x.com",
     "tiktok.com",
-    "instagram.com"
+    "instagram.com",
+    "facebook.com"
   ],
   allowedDomains: [],
   selectedCalendarId: null,
@@ -57,12 +58,20 @@ const WHOLE_DAY = [{ id: "day", label: "today", startHour: 0, endHour: 24 }];
 // `id` keys the stored usage buckets, so renaming one resets its budget.
 export const METERED_LIMITS = [
   { id: "x", domain: "x.com", label: "x.com", budgetMinutes: 12, periods: THIRDS_OF_DAY },
-  { id: "tiktok", domain: "tiktok.com", label: "TikTok", budgetMinutes: 8, periods: WHOLE_DAY },
+  { id: "tiktok", domain: "tiktok.com", label: "TikTok", budgetMinutes: 3, periods: WHOLE_DAY },
   {
     id: "instagram",
     domain: "instagram.com",
     label: "Instagram",
-    budgetMinutes: 8,
+    budgetMinutes: 3,
+    periods: WHOLE_DAY
+  },
+  { id: "reddit", domain: "reddit.com", label: "Reddit", budgetMinutes: 5, periods: WHOLE_DAY },
+  {
+    id: "facebook",
+    domain: "facebook.com",
+    label: "Facebook",
+    budgetMinutes: 5,
     periods: WHOLE_DAY
   }
 ];

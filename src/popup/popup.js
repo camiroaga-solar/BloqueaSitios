@@ -64,7 +64,7 @@ async function refresh() {
     statusEl.appendChild(warn);
   }
 
-  // Metered sites (x.com, TikTok, Instagram)
+  // Metered sites (x.com, TikTok, Instagram, Reddit, Facebook)
   try {
     const resp = await chrome.runtime.sendMessage({ type: "GET_METER_STATUS" });
     if (resp?.ok) {
