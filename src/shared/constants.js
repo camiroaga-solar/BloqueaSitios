@@ -99,6 +99,10 @@ export const CURFEW = {
 export const GOOGLE_SERVICE_ALLOW = [
   "accounts.google.com", // sign-in — every other service depends on it
   "myaccount.google.com",
+  "play.google.com", // Play Console / developer payments
+  "payments.google.com", // merchant payouts, tax forms and embedded verification
+  "pay.google.com", // Google Payments entry point
+  "wallet.google.com", // current redirect destination for pay.google.com
   "mail.google.com", // Gmail
   "drive.google.com", // Drive
   "docs.google.com", // Docs / Sheets / Slides / Forms
